@@ -15,14 +15,14 @@ import (
 
 type WorkerPool struct {
 	redisClient *pushsub.RedisClient
-	sandbox     *sandbox.DockerSandbox
+	sandbox     sandbox.Sandbox
 	pgDB        *db.PostgresDB
 	maxWorkers  int
 	wg          sync.WaitGroup
 	shutdown    chan struct{}
 }
 
-func NewWorkerPool(rc *pushsub.RedisClient, sb *sandbox.DockerSandbox, pgDB *db.PostgresDB, maxWorkers int) *WorkerPool {
+func NewWorkerPool(rc *pushsub.RedisClient, sb sandbox.Sandbox, pgDB *db.PostgresDB, maxWorkers int) *WorkerPool {
 	return &WorkerPool{
 		redisClient: rc,
 		sandbox:     sb,
