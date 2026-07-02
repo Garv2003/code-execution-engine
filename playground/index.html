@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Code Execution Engine — Playground</title>
+    <title>Playground — Code Execution Engine</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -33,13 +33,20 @@
         }
 
         header {
-            background: var(--bg-secondary);
+            background: rgba(22, 27, 34, 0.7);
+            backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border);
             padding: 12px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 16px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 24px;
         }
 
         .logo {
@@ -49,6 +56,19 @@
             background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            text-decoration: none;
+        }
+        
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover, .nav-links a.active {
+            color: var(--text-primary);
         }
 
         .controls {
@@ -146,9 +166,53 @@
 
         .dot-green { background: var(--accent-green); }
         .dot-blue { background: var(--accent-blue); }
+        
+        .tabs {
+            display: flex;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        .tab {
+            padding: 8px 16px;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            border-right: 1px solid var(--border);
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tab:hover { background: var(--bg-secondary); }
+        .tab.active {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+            border-bottom-color: var(--accent-blue);
+        }
+        .tab-close {
+            font-size: 14px;
+            cursor: pointer;
+            opacity: 0.5;
+        }
+        .tab-close:hover { opacity: 1; color: var(--accent-red); }
+        .tab-add {
+            padding: 8px 16px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .tab-add:hover { color: var(--accent-green); }
 
-        textarea {
+        .editor-container {
             flex: 1;
+            position: relative;
+        }
+
+        textarea.code-editor {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%; height: 100%;
             font-family: 'JetBrains Mono', monospace;
             font-size: 14px;
             line-height: 1.6;
@@ -159,9 +223,13 @@
             resize: none;
             outline: none;
             tab-size: 4;
+            display: none;
         }
-
-        textarea::placeholder { color: var(--text-secondary); }
+        textarea.code-editor.active {
+            display: block;
+        }
+        
+        textarea.code-editor::placeholder { color: var(--text-secondary); }
 
         .output-area {
             flex: 1;
@@ -189,10 +257,16 @@
 
         .stdin-section textarea {
             height: 80px;
+            width: 100%;
             flex: none;
-            border-top: 1px solid var(--border);
+            border: none;
             background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
             font-size: 13px;
+            padding: 12px;
+            resize: none;
+            outline: none;
         }
 
         footer {
@@ -244,7 +318,14 @@
 </head>
 <body>
     <header>
-        <div class="logo">⚡ CODE EXECUTION ENGINE</div>
+        <div class="header-left">
+            <a href="index.html" class="logo">⚡ CODE EXECUTION ENGINE</a>
+            <div class="nav-links">
+                <a href="#" class="active">Playground</a>
+                <a href="dashboard.html">Dashboard</a>
+            </div>
+        </div>
+        
         <div class="controls">
             <select id="language"></select>
             <button class="btn-run" id="runBtn" onclick="submitCode()">
@@ -258,7 +339,12 @@
     <div class="main-container">
         <div class="panel">
             <div class="panel-header"><span class="dot dot-green"></span> Editor</div>
-            <textarea id="codeEditor" placeholder="Write your code here..." spellcheck="false">print("Hello, World!")</textarea>
+            <div class="tabs" id="tabsContainer">
+                <!-- Tabs injected here -->
+            </div>
+            <div class="editor-container" id="editorContainer">
+                <!-- Textareas injected here -->
+            </div>
             <div class="stdin-section">
                 <div class="panel-header"><span class="dot dot-blue"></span> Standard Input (stdin)</div>
                 <textarea id="stdinInput" placeholder="Optional: Enter input data..." spellcheck="false"></textarea>
@@ -280,9 +366,80 @@
     <script>
         let API_BASE = window.location.origin;
         let defaultCode = {};
+        
+        // Multi-file state
+        let files = { "main": "" };
+        let activeFile = "main";
+        
+        function renderTabs() {
+            const tabsContainer = document.getElementById("tabsContainer");
+            const editorContainer = document.getElementById("editorContainer");
+            
+            tabsContainer.innerHTML = "";
+            editorContainer.innerHTML = "";
+            
+            Object.keys(files).forEach(filename => {
+                // Render Tab
+                const tab = document.createElement("div");
+                tab.className = "tab " + (filename === activeFile ? "active" : "");
+                tab.onclick = () => { activeFile = filename; renderTabs(); };
+                tab.innerHTML = `
+                    ${filename}
+                    ${filename !== "main" ? `<span class="tab-close" onclick="event.stopPropagation(); deleteFile('${filename}')">&times;</span>` : ''}
+                `;
+                tabsContainer.appendChild(tab);
+                
+                // Render Textarea
+                const textarea = document.createElement("textarea");
+                textarea.className = "code-editor " + (filename === activeFile ? "active" : "");
+                textarea.spellcheck = false;
+                textarea.value = files[filename];
+                textarea.placeholder = "Write code for " + filename;
+                textarea.oninput = (e) => { files[filename] = e.target.value; };
+                
+                // Catch Tab key
+                textarea.addEventListener('keydown', function(e) {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        const start = this.selectionStart;
+                        const end = this.selectionEnd;
+                        this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+                        this.selectionStart = this.selectionEnd = start + 4;
+                        files[filename] = this.value;
+                    }
+                });
+                
+                editorContainer.appendChild(textarea);
+            });
+            
+            const addBtn = document.createElement("div");
+            addBtn.className = "tab-add";
+            addBtn.textContent = "+";
+            addBtn.onclick = addFile;
+            tabsContainer.appendChild(addBtn);
+        }
+        
+        function addFile() {
+            const filename = prompt("Enter file name (e.g. utils.py, header.h):");
+            if (filename && filename.trim() !== "" && !files[filename]) {
+                files[filename] = "";
+                activeFile = filename;
+                renderTabs();
+            }
+        }
+        
+        function deleteFile(filename) {
+            if (confirm("Delete " + filename + "?")) {
+                delete files[filename];
+                if (activeFile === filename) activeFile = "main";
+                renderTabs();
+            }
+        }
 
         document.getElementById("language").addEventListener("change", function() {
-            document.getElementById("codeEditor").value = defaultCode[this.value] || "";
+            files = { "main": defaultCode[this.value] || "" };
+            activeFile = "main";
+            renderTabs();
         });
 
         document.addEventListener("keydown", function(e) {
@@ -303,9 +460,7 @@
 
             try {
                 const res = await fetch("config.json", { cache: "no-store" });
-                if (!res.ok) {
-                    throw new Error("Failed to load playground config");
-                }
+                if (!res.ok) throw new Error("Failed to load playground config");
 
                 const config = await res.json();
                 API_BASE = config.api_base || window.location.origin;
@@ -323,12 +478,14 @@
                 const firstLanguage = languageSelect.options[0]?.value;
                 if (firstLanguage) {
                     languageSelect.value = firstLanguage;
-                    document.getElementById("codeEditor").value = defaultCode[firstLanguage] || "";
+                    files = { "main": defaultCode[firstLanguage] || "" };
+                    renderTabs();
                 }
             } catch (err) {
                 languageSelect.innerHTML = '<option value="python">Python</option>';
                 defaultCode = { python: 'print("Hello, World!")' };
-                document.getElementById("codeEditor").value = defaultCode.python;
+                files = { "main": defaultCode.python };
+                renderTabs();
                 setStatus("error", "CONFIG ERROR");
             }
         }
@@ -336,11 +493,14 @@
         async function submitCode() {
             const btn = document.getElementById("runBtn");
             const output = document.getElementById("output");
-            const code = document.getElementById("codeEditor").value;
             const language = document.getElementById("language").value;
             const stdin = document.getElementById("stdinInput").value;
+            
+            const code = files["main"] || "";
+            const extraFiles = { ...files };
+            delete extraFiles["main"]; // everything else goes to files payload
 
-            if (!code.trim()) {
+            if (!code.trim() && Object.keys(extraFiles).length === 0) {
                 output.innerHTML = '<span class="waiting">Please enter some code to run.</span>';
                 return;
             }
@@ -358,10 +518,15 @@
             document.getElementById("exitCode").className = "stat-value";
 
             try {
+                const payload = { language, code, stdin };
+                if (Object.keys(extraFiles).length > 0) {
+                    payload.files = extraFiles;
+                }
+                
                 const submitRes = await fetch(API_BASE + "/submit", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ language, code, stdin })
+                    body: JSON.stringify(payload)
                 });
 
                 if (!submitRes.ok) {

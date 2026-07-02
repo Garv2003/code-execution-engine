@@ -15,6 +15,7 @@ type RedisClient struct {
 }
 
 const resultTTL = 15 * time.Minute
+const jobTTL = 24 * time.Hour
 
 func NewRedisClient(redisURL string) (*RedisClient, error) {
 	opts, err := redis.ParseURL(redisURL)
@@ -67,6 +68,19 @@ func (r *RedisClient) PublishResult(ctx context.Context, jobID string, result *m
 	return r.client.Publish(ctx, channel, data).Err()
 }
 
+func (r *RedisClient) StoreJobRecord(ctx context.Context, record *models.JobRecord) error {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	jobKey := fmt.Sprintf("cee:job:%s", record.ID)
+	return r.client.Set(ctx, jobKey, data, jobTTL).Err()
+}
+
+func (r *RedisClient) UpdateJobRecord(ctx context.Context, record *models.JobRecord) error {
+	return r.StoreJobRecord(ctx, record)
+}
+
 func (r *RedisClient) SubscribeResult(ctx context.Context, jobID string) *redis.PubSub {
 	channel := fmt.Sprintf("result:%s", jobID)
 	return r.client.Subscribe(ctx, channel)
@@ -82,4 +96,21 @@ func (r *RedisClient) GetResult(ctx context.Context, jobID string) (string, bool
 		return "", false, err
 	}
 	return data, true, nil
+}
+
+func (r *RedisClient) GetJobRecord(ctx context.Context, jobID string) (*models.JobRecord, bool, error) {
+	jobKey := fmt.Sprintf("cee:job:%s", jobID)
+	data, err := r.client.Get(ctx, jobKey).Result()
+	if err == redis.Nil {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	var record models.JobRecord
+	if err := json.Unmarshal([]byte(data), &record); err != nil {
+		return nil, false, err
+	}
+	return &record, true, nil
 }
