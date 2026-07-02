@@ -38,6 +38,9 @@ services:
       - DOCKER_TIMEOUT_MS=5000
       - DOCKER_MEMORY_LIMIT=128m
       - PRE_PULL_LANGUAGES=python,golang,cpp,c,javascript,typescript,java,rust,ruby,php
+      # Requires gVisor (runsc) installed and registered as a Docker runtime on the host.
+      # See "Sandbox Runtime: gVisor" in README.md. Leave unset to use the default runc runtime.
+      # - DOCKER_RUNTIME=runsc
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/docker/go-units"
 	"github.com/garv2003/code-execution-engine/internal/config"
 	"github.com/garv2003/code-execution-engine/internal/models"
 )
@@ -177,10 +178,19 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		WorkingDir:   "/app",
 	}
 
+	memoryLimit, err := units.RAMInBytes(s.cfg.DockerMemoryLimit)
+	if err != nil || memoryLimit <= 0 {
+		memoryLimit = 128 * 1024 * 1024
+	}
+	if spec.MemoryMB > 0 {
+		memoryLimit = spec.MemoryMB * 1024 * 1024
+	}
+
 	hostConfig := &container.HostConfig{
 		Resources: container.Resources{
-			Memory:         128 * 1024 * 1024,
-			NanoCPUs:       500000000,
+			Memory:         memoryLimit,
+			CPUPeriod:      s.cfg.DockerCPUPeriod,
+			CPUQuota:       s.cfg.DockerCPUQuota,
 			OomKillDisable: boolPtr(false),
 		},
 		NetworkMode: "none",
@@ -188,12 +198,6 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 
 	if s.cfg.DockerRuntime != "" {
 		hostConfig.Runtime = s.cfg.DockerRuntime
-	}
-
-	if spec.MemoryMB > 0 {
-		hostConfig.Resources.Memory = spec.MemoryMB * 1024 * 1024
-	} else if s.cfg.DockerMemoryLimit == "128m" {
-		hostConfig.Resources.Memory = 128 * 1024 * 1024
 	}
 
 	if err := s.ensureImage(ctx, job.Language, spec.Image); err != nil {

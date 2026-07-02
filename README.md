@@ -142,7 +142,31 @@ curl -N http://localhost:8080/result/abc123
 | `PRE_PULL_LANGUAGES` | empty | Comma-separated language IDs to pre-pull; empty means all |
 | `DATABASE_URL` | empty | Postgres connection string; when set, job history is persisted and `/dashboard/jobs` is enabled |
 | `API_KEYS` | empty | Comma-separated API keys; when set, all routes except `/health` and `/playground/*` require a matching `X-API-Key` header or `api_key` query param |
-| `DOCKER_RUNTIME` | empty | Docker runtime to use for containers (e.g. `sysbox-runc`); empty uses the daemon default |
+| `DOCKER_RUNTIME` | empty | Docker runtime to use for containers (e.g. `runsc`); empty uses the daemon default |
+
+---
+
+## Sandbox Runtime: gVisor
+
+By default, containers run under the Docker daemon's normal `runc` runtime, which shares the host kernel. For stronger isolation against kernel-level exploits, point the sandbox at [gVisor](https://gvisor.dev)'s `runsc` runtime instead — the application code doesn't need to change, since `internal/sandbox/docker.go` already forwards `DOCKER_RUNTIME` to the container's `HostConfig.Runtime`.
+
+Setup (on the Docker host, not in this repo):
+
+1. Install gVisor: follow the [official install guide](https://gvisor.dev/docs/user_guide/install/) to get the `runsc` binary onto the host.
+2. Register it with Docker by adding a runtime entry to `/etc/docker/daemon.json`:
+   ```json
+   {
+     "runtimes": {
+       "runsc": {
+         "path": "/usr/local/bin/runsc"
+       }
+     }
+   }
+   ```
+3. Restart the Docker daemon: `sudo systemctl restart docker`.
+4. Set `DOCKER_RUNTIME=runsc` in your environment (or uncomment it in `docker-compose.yml`) and restart the worker.
+
+**Tradeoff:** gVisor intercepts syscalls in userspace, which adds CPU/IO overhead per execution in exchange for a much stronger sandbox boundary. Some syscalls used by less common language runtimes may be unsupported — verify with `make verify` after switching.
 
 ---
 
