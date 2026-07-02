@@ -19,12 +19,15 @@ type Config struct {
 	PrePullImages      bool
 	PrePullLanguages   []string
 	RateLimitRPM       int
+	APIKeys            []string
 	CORSAllowedOrigins []string
 	CORSAllowedMethods []string
 	CORSAllowedHeaders []string
 	DockerMemoryLimit  string
 	DockerCPUPeriod    int64
 	DockerCPUQuota     int64
+	DockerRuntime      string
+	DatabaseURL        string
 }
 
 func Load() (*Config, error) {
@@ -70,12 +73,15 @@ func Load() (*Config, error) {
 		PrePullImages:      getEnvBool("PRE_PULL_IMAGES", true),
 		PrePullLanguages:   getEnvCSV("PRE_PULL_LANGUAGES", ""),
 		RateLimitRPM:       rateLimitRPM,
+		APIKeys:            getEnvCSV("API_KEYS", ""),
 		CORSAllowedOrigins: getEnvCSV("CORS_ALLOWED_ORIGINS", "*"),
 		CORSAllowedMethods: getEnvCSV("CORS_ALLOWED_METHODS", "GET,POST,OPTIONS"),
 		CORSAllowedHeaders: getEnvCSV("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"),
 		DockerMemoryLimit:  dockerMemLimit,
 		DockerCPUPeriod:    dockerCPUPeriod,
 		DockerCPUQuota:     dockerCPUQuota,
+		DockerRuntime:      getEnv("DOCKER_RUNTIME", ""),
+		DatabaseURL:        getEnv("DATABASE_URL", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {

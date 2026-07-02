@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/garv2003/code-execution-engine/internal/db"
 	"github.com/garv2003/code-execution-engine/internal/models"
 	"github.com/garv2003/code-execution-engine/internal/pushsub"
 	"github.com/garv2003/code-execution-engine/internal/sandbox"
@@ -14,15 +16,17 @@ import (
 type WorkerPool struct {
 	redisClient *pushsub.RedisClient
 	sandbox     *sandbox.DockerSandbox
+	pgDB        *db.PostgresDB
 	maxWorkers  int
 	wg          sync.WaitGroup
 	shutdown    chan struct{}
 }
 
-func NewWorkerPool(rc *pushsub.RedisClient, sb *sandbox.DockerSandbox, maxWorkers int) *WorkerPool {
+func NewWorkerPool(rc *pushsub.RedisClient, sb *sandbox.DockerSandbox, pgDB *db.PostgresDB, maxWorkers int) *WorkerPool {
 	return &WorkerPool{
 		redisClient: rc,
 		sandbox:     sb,
+		pgDB:        pgDB,
 		maxWorkers:  maxWorkers,
 		shutdown:    make(chan struct{}),
 	}
@@ -56,9 +60,25 @@ func (wp *WorkerPool) worker(workerID int) {
 
 			slog.Info("Worker picked up job", "worker_id", workerID, "job_id", job.ID)
 
+			startedAt := time.Now().UTC()
+			if record, found, err := wp.redisClient.GetJobRecord(context.Background(), job.ID); err == nil && found {
+				record.Status = models.JobStatusRunning
+				record.StartedAt = &startedAt
+				_ = wp.redisClient.UpdateJobRecord(context.Background(), record)
+				if wp.pgDB != nil {
+					_ = wp.pgDB.UpsertJobRecord(context.Background(), record)
+				}
+			}
+
 			runCtx, runCancel := context.WithTimeout(context.Background(), job.Timeout)
 			result, err := wp.sandbox.Run(runCtx, job)
 			runCancel()
+
+			finishedAt := time.Now().UTC()
+			record, found, recordErr := wp.redisClient.GetJobRecord(context.Background(), job.ID)
+			if recordErr == nil && found {
+				record.FinishedAt = &finishedAt
+			}
 
 			if err != nil {
 				slog.Error("Failed execution run", "job_id", job.ID, "error", err)
@@ -66,6 +86,41 @@ func (wp *WorkerPool) worker(workerID int) {
 					ID:       job.ID,
 					ExitCode: -1,
 					Stderr:   "Internal Sandbox Error: " + err.Error(),
+				}
+				if found {
+					record.Status = models.JobStatusFailed
+					record.Error = err.Error()
+					record.Result = result
+					_ = wp.redisClient.UpdateJobRecord(context.Background(), record)
+					if wp.pgDB != nil {
+						_ = wp.pgDB.UpsertJobRecord(context.Background(), record)
+					}
+				}
+			} else if result.Timeout || result.OOM {
+				if found {
+					record.Status = models.JobStatusFailed
+					if result.Timeout {
+						record.Error = "execution timed out"
+					} else {
+						record.Error = "out of memory"
+					}
+					record.Result = result
+					_ = wp.redisClient.UpdateJobRecord(context.Background(), record)
+					if wp.pgDB != nil {
+						_ = wp.pgDB.UpsertJobRecord(context.Background(), record)
+					}
+				}
+			} else {
+				if found {
+					record.Status = models.JobStatusCompleted
+					if result.ExitCode != 0 {
+						record.Error = fmt.Sprintf("non-zero exit code: %d", result.ExitCode)
+					}
+					record.Result = result
+					_ = wp.redisClient.UpdateJobRecord(context.Background(), record)
+					if wp.pgDB != nil {
+						_ = wp.pgDB.UpsertJobRecord(context.Background(), record)
+					}
 				}
 			}
 

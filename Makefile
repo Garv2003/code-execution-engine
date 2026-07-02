@@ -3,7 +3,7 @@ BINARY_NAME=server
 BUILD_DIR=bin
 CMD_DIR=./cmd/server
 
-.PHONY: all build run playground backend worker both test clean lint redis-start redis-stop help
+.PHONY: all build run playground backend worker both test clean lint redis-start redis-stop help verify
 
 all: build
 
@@ -12,6 +12,12 @@ build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@go build -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
+	@go build -o $(BUILD_DIR)/verify ./cmd/verify
+
+## verify: Run health checks for all configured docker images
+verify:
+	@echo "Verifying runtimes..."
+	@go run ./cmd/verify
 
 ## run: Run the server locally
 run:

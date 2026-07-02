@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/garv2003/code-execution-engine/internal/config"
+	"github.com/garv2003/code-execution-engine/internal/db"
 	"github.com/garv2003/code-execution-engine/internal/handler"
 	"github.com/garv2003/code-execution-engine/internal/middleware"
 	"github.com/garv2003/code-execution-engine/internal/pushsub"
@@ -41,6 +42,12 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("Connected to Redis successfully")
+
+	pgDB, err := db.NewPostgresDB(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("Postgres connection failure", "error", err)
+		os.Exit(1)
+	}
 
 	langConfig, err := sandbox.LoadLanguageConfig(cfg.LanguageConfig)
 	if err != nil {
@@ -82,21 +89,25 @@ func main() {
 			}()
 		}
 
-		workerPool = worker.NewWorkerPool(redisClient, dockerSandbox, cfg.MaxWorkers)
+		workerPool = worker.NewWorkerPool(redisClient, dockerSandbox, pgDB, cfg.MaxWorkers)
 		workerPool.Start()
 	}
 
 	var srv *http.Server
 
 	if mode == "api" || mode == "both" {
-		submitHandler := handler.NewSubmitHandler(redisClient, supportedLanguages)
+		submitHandler := handler.NewSubmitHandler(redisClient, pgDB, langConfig)
 		resultHandler := handler.NewResultHandler(redisClient)
 		healthHandler := handler.NewHealthHandler()
+		jobHandler := handler.NewJobHandler(redisClient)
+		dashboardHandler := handler.NewDashboardHandler(pgDB)
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /health", healthHandler.Health)
 		mux.HandleFunc("POST /submit", submitHandler.Submit)
 		mux.HandleFunc("GET /result/{id}", resultHandler.Result)
+		mux.HandleFunc("GET /jobs/{id}", jobHandler.Job)
+		mux.HandleFunc("GET /dashboard/jobs", dashboardHandler.Jobs)
 		if cfg.PlaygroundEnabled {
 			mux.Handle("GET /playground/", http.StripPrefix("/playground/", http.FileServer(http.Dir(cfg.PlaygroundDir))))
 			mux.Handle("GET /playground", http.RedirectHandler("/playground/", http.StatusMovedPermanently))
@@ -105,6 +116,7 @@ func main() {
 		var apiHandler http.Handler = mux
 		apiHandler = middleware.NewRateLimiter(cfg.RateLimitRPM).Limit(apiHandler)
 		apiHandler = middleware.CORS(cfg.CORSAllowedOrigins, cfg.CORSAllowedMethods, cfg.CORSAllowedHeaders, apiHandler)
+		apiHandler = middleware.APIKey(cfg.APIKeys, apiHandler)
 
 		serverAddr := ":" + cfg.Port
 		srv = &http.Server{

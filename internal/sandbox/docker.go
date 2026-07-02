@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -25,6 +27,9 @@ type LanguageSpec struct {
 	Filename       string `json:"filename"`
 	CompileCommand string `json:"compile_command"`
 	RunCommand     string `json:"run_command"`
+	TimeoutMS      int    `json:"timeout_ms"`
+	MemoryMB       int64  `json:"memory_mb"`
+	HealthCheck    string `json:"health_check_command"`
 }
 
 type LanguageConfig map[string]LanguageSpec
@@ -87,21 +92,61 @@ func (s *DockerSandbox) PrePullImages(ctx context.Context, languages []string) e
 	return nil
 }
 
-func makeTarArchive(filename string, fileContent string) (io.Reader, error) {
+func (s *DockerSandbox) VerifyRuntimes(ctx context.Context) error {
+	var verifyErrors []string
+	for lang, spec := range s.languages {
+		slog.Info("Verifying runtime image", "language", lang, "image", spec.Image)
+		if err := s.ensureImage(ctx, lang, spec.Image); err != nil {
+			slog.Error("Failed to ensure runtime image", "language", lang, "error", err)
+			verifyErrors = append(verifyErrors, lang+": "+err.Error())
+			continue
+		}
+		if spec.HealthCheck == "" {
+			continue
+		}
+		if err := s.runHealthCheck(ctx, lang, spec); err != nil {
+			slog.Error("Runtime health check failed", "language", lang, "error", err)
+			verifyErrors = append(verifyErrors, lang+": "+err.Error())
+		}
+	}
+	if len(verifyErrors) > 0 {
+		return errors.New("runtime verification failed: " + strings.Join(verifyErrors, "; "))
+	}
+	return nil
+}
+
+func makeTarArchive(filename string, fileContent string, extraFiles map[string]string) (io.Reader, error) {
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
 
-	hdr := &tar.Header{
-		Name: filename,
-		Mode: 0600,
-		Size: int64(len(fileContent)),
+	if fileContent != "" && filename != "" {
+		hdr := &tar.Header{
+			Name: filename,
+			Mode: 0644,
+			Size: int64(len(fileContent)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write([]byte(fileContent)); err != nil {
+			return nil, err
+		}
 	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return nil, err
+
+	for name, content := range extraFiles {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			return nil, err
+		}
 	}
-	if _, err := tw.Write([]byte(fileContent)); err != nil {
-		return nil, err
-	}
+
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
@@ -141,7 +186,13 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		NetworkMode: "none",
 	}
 
-	if s.cfg.DockerMemoryLimit == "128m" {
+	if s.cfg.DockerRuntime != "" {
+		hostConfig.Runtime = s.cfg.DockerRuntime
+	}
+
+	if spec.MemoryMB > 0 {
+		hostConfig.Resources.Memory = spec.MemoryMB * 1024 * 1024
+	} else if s.cfg.DockerMemoryLimit == "128m" {
 		hostConfig.Resources.Memory = 128 * 1024 * 1024
 	}
 
@@ -158,7 +209,7 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		_ = s.cli.ContainerRemove(context.Background(), containerID, container.RemoveOptions{Force: true})
 	}()
 
-	tarReader, err := makeTarArchive(spec.Filename, job.Code)
+	tarReader, err := makeTarArchive(spec.Filename, job.Code, job.Files)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +233,28 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 	err = s.cli.ContainerStart(ctx, containerID, container.StartOptions{})
 	if err != nil {
 		return nil, err
+	}
+
+	var maxMemory atomic.Uint64
+	statsResp, statsErr := s.cli.ContainerStats(ctx, containerID, true)
+	if statsErr == nil {
+		go func() {
+			defer statsResp.Body.Close()
+			decoder := json.NewDecoder(statsResp.Body)
+			for {
+				var stat struct {
+					MemoryStats struct {
+						Usage uint64 `json:"usage"`
+					} `json:"memory_stats"`
+				}
+				if err := decoder.Decode(&stat); err != nil {
+					break
+				}
+				if stat.MemoryStats.Usage > maxMemory.Load() {
+					maxMemory.Store(stat.MemoryStats.Usage)
+				}
+			}
+		}()
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -239,7 +312,7 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		TimeUsed:   duration,
 		OOM:        isOom,
 		Timeout:    false,
-		MemoryUsed: 0,
+		MemoryUsed: int64(maxMemory.Load()),
 	}, nil
 }
 
@@ -261,4 +334,47 @@ func (s *DockerSandbox) ensureImage(ctx context.Context, language string, imageN
 
 	_, copyErr := io.Copy(io.Discard, reader)
 	return copyErr
+}
+
+func (s *DockerSandbox) runHealthCheck(ctx context.Context, language string, spec LanguageSpec) error {
+	containerConfig := &container.Config{
+		Image:      spec.Image,
+		Cmd:        []string{"sh", "-lc", spec.HealthCheck},
+		WorkingDir: "/app",
+	}
+
+	resp, err := s.cli.ContainerCreate(ctx, containerConfig, &container.HostConfig{
+		NetworkMode: "none",
+		Resources: container.Resources{
+			Memory:   32 * 1024 * 1024,
+			NanoCPUs: 100000000,
+		},
+	}, nil, nil, "")
+	if err != nil {
+		return err
+	}
+	containerID := resp.ID
+	defer func() {
+		_ = s.cli.ContainerRemove(context.Background(), containerID, container.RemoveOptions{Force: true})
+	}()
+
+	if err := s.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return err
+	}
+
+	statusCh, errCh := s.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("health check exited with code %d", status.StatusCode)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	return nil
 }

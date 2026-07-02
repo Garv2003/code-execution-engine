@@ -7,27 +7,32 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/garv2003/code-execution-engine/internal/db"
 	"github.com/garv2003/code-execution-engine/internal/models"
 	"github.com/garv2003/code-execution-engine/internal/pushsub"
+	"github.com/garv2003/code-execution-engine/internal/sandbox"
 )
 
 type SubmitHandler struct {
-	redisClient        *pushsub.RedisClient
-	supportedLanguages map[string]bool
+	redisClient *pushsub.RedisClient
+	pgDB        *db.PostgresDB
+	languages   map[string]sandbox.LanguageSpec
 }
 
-func NewSubmitHandler(rc *pushsub.RedisClient, supported map[string]bool) SubmitHandler {
+func NewSubmitHandler(rc *pushsub.RedisClient, pgDB *db.PostgresDB, languages map[string]sandbox.LanguageSpec) SubmitHandler {
 	return SubmitHandler{
-		redisClient:        rc,
-		supportedLanguages: supported,
+		redisClient: rc,
+		pgDB:        pgDB,
+		languages:   languages,
 	}
 }
 
 type submitRequest struct {
-	Language  string `json:"language"`
-	Code      string `json:"code"`
-	Stdin     string `json:"stdin"`
-	TimeoutMS int    `json:"timeout_ms"`
+	Language  string            `json:"language"`
+	Code      string            `json:"code"`
+	Files     map[string]string `json:"files"`
+	Stdin     string            `json:"stdin"`
+	TimeoutMS int               `json:"timeout_ms"`
 }
 
 func (sh *SubmitHandler) Submit(w http.ResponseWriter, r *http.Request) {
@@ -40,13 +45,14 @@ func (sh *SubmitHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Language == "" || req.Code == "" {
+	if req.Language == "" || (req.Code == "" && len(req.Files) == 0) {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"language and code are required fields"}`))
+		_, _ = w.Write([]byte(`{"error":"language and code or files are required fields"}`))
 		return
 	}
 
-	if !sh.supportedLanguages[req.Language] {
+	spec, exists := sh.languages[req.Language]
+	if !exists {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"Unsupported language"}`))
 		return
@@ -56,14 +62,43 @@ func (sh *SubmitHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	if req.TimeoutMS > 0 {
 		timeout = time.Duration(req.TimeoutMS) * time.Millisecond
 	}
+	if spec.TimeoutMS > 0 {
+		maxTimeout := time.Duration(spec.TimeoutMS) * time.Millisecond
+		if timeout == 0 || timeout > maxTimeout {
+			timeout = maxTimeout
+		}
+	}
 
 	jobID := generateUUID()
 	job := &models.Job{
-		ID:        jobID,
-		Language:  req.Language,
-		Code:      req.Code,
-		Stdin:     req.Stdin,
-		Timeout:   timeout,
+		ID:            jobID,
+		Language:      req.Language,
+		Code:          req.Code,
+		Files:         req.Files,
+		Stdin:         req.Stdin,
+		Timeout:       timeout,
+		MemoryLimitMB: spec.MemoryMB,
+	}
+
+	record := &models.JobRecord{
+		ID:            jobID,
+		Language:      req.Language,
+		Status:        models.JobStatusQueued,
+		TimeoutMS:     int64(timeout / time.Millisecond),
+		MemoryLimitMB: spec.MemoryMB,
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	if err := sh.redisClient.StoreJobRecord(r.Context(), record); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintf(w, `{"error":"Failed to store job: %s"}`, err.Error())
+		return
+	}
+
+	if sh.pgDB != nil {
+		if err := sh.pgDB.UpsertJobRecord(r.Context(), record); err != nil {
+			// Non-fatal if we can't save to pg but saved to redis, though we should log
+		}
 	}
 
 	if err := sh.redisClient.PushJob(r.Context(), job); err != nil {

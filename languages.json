@@ -3,120 +3,180 @@
     "image": "python:3.10-slim",
     "filename": "solution.py",
     "compile_command": "",
-    "run_command": "python3 /app/solution.py"
+    "run_command": "python3 /app/solution.py",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "python3 -c 'print(1)'"
   },
   "golang": {
     "image": "golang:1.22-alpine",
     "filename": "main.go",
     "compile_command": "",
-    "run_command": "go run /app/main.go"
+    "run_command": "go run /app/main.go",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "go version"
   },
   "cpp": {
     "image": "gcc:13",
     "filename": "solution.cpp",
     "compile_command": "g++ -O2 -o /app/solution /app/solution.cpp",
-    "run_command": "/app/solution"
+    "run_command": "/app/solution",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "g++ --version"
   },
   "c": {
     "image": "gcc:13",
     "filename": "solution.c",
     "compile_command": "gcc -O2 -o /app/solution /app/solution.c",
-    "run_command": "/app/solution"
+    "run_command": "/app/solution",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "gcc --version"
   },
   "javascript": {
     "image": "node:20-alpine",
     "filename": "solution.js",
     "compile_command": "",
-    "run_command": "node /app/solution.js"
+    "run_command": "node /app/solution.js",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "node -v"
   },
   "typescript": {
     "image": "denoland/deno:alpine",
     "filename": "solution.ts",
     "compile_command": "",
-    "run_command": "deno run --allow-read /app/solution.ts"
+    "run_command": "deno run --allow-read /app/solution.ts",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "deno --version"
   },
   "java": {
     "image": "eclipse-temurin:21-alpine",
     "filename": "Solution.java",
     "compile_command": "javac /app/Solution.java",
-    "run_command": "java -cp /app Solution"
+    "run_command": "java -cp /app Solution",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "java -version"
   },
   "rust": {
     "image": "rust:1.79-alpine",
     "filename": "solution.rs",
     "compile_command": "rustc -O -o /app/solution /app/solution.rs",
-    "run_command": "/app/solution"
+    "run_command": "/app/solution",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "rustc --version"
   },
   "ruby": {
     "image": "ruby:3.3-alpine",
     "filename": "solution.rb",
     "compile_command": "",
-    "run_command": "ruby /app/solution.rb"
+    "run_command": "ruby /app/solution.rb",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "ruby -v"
   },
   "php": {
     "image": "php:8.3-cli-alpine",
     "filename": "solution.php",
     "compile_command": "",
-    "run_command": "php /app/solution.php"
+    "run_command": "php /app/solution.php",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "php -v"
   },
   "bash": {
     "image": "bash:5.2-alpine3.20",
     "filename": "solution.sh",
     "compile_command": "",
-    "run_command": "bash /app/solution.sh"
+    "run_command": "bash /app/solution.sh",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "bash --version"
   },
   "perl": {
     "image": "perl:5.40-slim",
     "filename": "solution.pl",
     "compile_command": "",
-    "run_command": "perl /app/solution.pl"
+    "run_command": "perl /app/solution.pl",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "perl -v"
   },
   "lua": {
     "image": "nickblah/lua:5.4-alpine",
     "filename": "solution.lua",
     "compile_command": "",
-    "run_command": "lua /app/solution.lua"
+    "run_command": "lua /app/solution.lua",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "lua -v"
   },
   "dart": {
     "image": "dart:3.5",
     "filename": "solution.dart",
     "compile_command": "",
-    "run_command": "dart /app/solution.dart"
+    "run_command": "dart /app/solution.dart",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "dart --version"
   },
   "julia": {
     "image": "julia:1.10",
     "filename": "solution.jl",
     "compile_command": "",
-    "run_command": "julia /app/solution.jl"
+    "run_command": "julia /app/solution.jl",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "julia -v"
   },
   "r": {
     "image": "r-base:4.4.1",
     "filename": "solution.R",
     "compile_command": "",
-    "run_command": "Rscript /app/solution.R"
+    "run_command": "Rscript /app/solution.R",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "R --version"
   },
   "elixir": {
     "image": "elixir:1.17",
     "filename": "solution.exs",
     "compile_command": "",
-    "run_command": "elixir /app/solution.exs"
+    "run_command": "elixir /app/solution.exs",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "elixir -v"
   },
   "erlang": {
     "image": "erlang:27-alpine",
     "filename": "solution.erl",
     "compile_command": "erlc -o /app /app/solution.erl",
-    "run_command": "erl -noshell -pa /app -s solution main -s init stop"
+    "run_command": "erl -noshell -pa /app -s solution main -s init stop",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().'  -noshell"
   },
   "clojure": {
     "image": "clojure:temurin-21-tools-deps-alpine",
     "filename": "solution.clj",
     "compile_command": "",
-    "run_command": "clojure /app/solution.clj"
+    "run_command": "clojure /app/solution.clj",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "clojure -Sdescribe"
   },
   "haskell": {
     "image": "haskell:9.8.2-slim",
     "filename": "solution.hs",
     "compile_command": "ghc -O2 -o /app/solution /app/solution.hs",
-    "run_command": "/app/solution"
+    "run_command": "/app/solution",
+    "timeout_ms": 5000,
+    "memory_mb": 128,
+    "health_check_command": "ghc --version"
   }
 }
