@@ -56,6 +56,9 @@ A LeetCode-style code execution backend in Go — ephemeral Docker containers, w
 - **Real-time SSE streaming** — output is streamed token-by-token to the client over Server-Sent Events as the container produces it; no polling
 - **Redis Pub/Sub for distributed delivery** — results are published to Redis channels so any API server instance can deliver the SSE stream, enabling horizontal scaling
 - **Configurable resource limits** — max workers, Docker timeout, memory cap, and CPU quota all tunable via environment variables
+- **Multi-file submissions** — send auxiliary source/header files alongside the main entrypoint; all files are written into the container's working directory before execution
+- **Job history dashboard** — optional Postgres-backed persistence powers a `/playground/dashboard.html` UI and `GET /dashboard/jobs` endpoint for browsing past executions, status, timing, and output
+- **API key authentication** — optional `API_KEYS` gate on all routes except `/health` and the static playground, checked via header or query param (so it also works with `EventSource`, which can't set headers)
 
 ---
 
@@ -137,6 +140,9 @@ curl -N http://localhost:8080/result/abc123
 | `PLAYGROUND_DIR` | `playground` | Directory used by the static playground server |
 | `PRE_PULL_IMAGES` | `true` | Pre-pull sandbox images on worker startup |
 | `PRE_PULL_LANGUAGES` | empty | Comma-separated language IDs to pre-pull; empty means all |
+| `DATABASE_URL` | empty | Postgres connection string; when set, job history is persisted and `/dashboard/jobs` is enabled |
+| `API_KEYS` | empty | Comma-separated API keys; when set, all routes except `/health` and `/playground/*` require a matching `X-API-Key` header or `api_key` query param |
+| `DOCKER_RUNTIME` | empty | Docker runtime to use for containers (e.g. `sysbox-runc`); empty uses the daemon default |
 
 ---
 
@@ -173,9 +179,14 @@ Submit code for execution.
 {
   "language": "python",
   "code": "print('hello world')",
-  "stdin": ""
+  "stdin": "",
+  "files": {
+    "helper.py": "def greet():\n    return 'hi'"
+  }
 }
 ```
+
+`code` is written to the language's entrypoint filename (e.g. `solution.py`); `files` is an optional map of additional filenames to contents, written alongside it in the container's working directory.
 
 **Response:**
 ```json
@@ -208,6 +219,35 @@ Events:
 - `data: <output chunk>` — stdout/stderr output as it is produced
 - `data: [DONE]` — execution complete
 - `data: [ERROR] <message>` — execution failed (timeout, OOM, runtime error)
+
+---
+
+### GET /jobs/:id
+
+Fetch the current record for a job (status, timing, result) without streaming — useful for polling.
+
+**Response:**
+```json
+{
+  "id": "abc123",
+  "language": "python",
+  "status": "completed",
+  "created_at": "2026-07-02T10:00:00Z",
+  "result": { "exit_code": 0, "stdout": "hello world\n" }
+}
+```
+
+`404` if the job ID is unknown.
+
+---
+
+### GET /dashboard/jobs
+
+List recent job records for the dashboard UI. Requires `DATABASE_URL` to be configured.
+
+**Query params:** `limit` (default `50`)
+
+**Response:** `200` with a JSON array of job records, or `501 Not Implemented` if Postgres isn't configured.
 
 ---
 
