@@ -143,6 +143,27 @@ curl -N http://localhost:8080/result/abc123
 | `DATABASE_URL` | empty | Postgres connection string; when set, job history is persisted and `/dashboard/jobs` is enabled |
 | `API_KEYS` | empty | Comma-separated API keys; when set, all routes except `/health` and `/playground/*` require a matching `X-API-Key` header or `api_key` query param |
 | `DOCKER_RUNTIME` | empty | Docker runtime to use for containers (e.g. `runsc`); empty uses the daemon default |
+| `SANDBOX_BACKEND` | `docker` | `docker` or `native` (experimental) — see "Sandbox Backends: Native" below |
+| `NATIVE_WORKDIR` | OS temp dir | Native backend only — base directory for per-job temp directories |
+| `NATIVE_UID` / `NATIVE_GID` | `0` | Native backend only — UID/GID to drop the sandboxed process to; requires the worker to run as root |
+
+---
+
+## Sandbox Backends: Native (Experimental)
+
+`SANDBOX_BACKEND=native` runs jobs directly on the host instead of in Docker containers — no daemon, no `docker.sock`, no images. It isolates each job using Linux namespaces (PID, mount, network, UTS, IPC) and enforces memory/CPU/PID-count limits via cgroups v2, then executes the language's existing `run_command`/`compile_command` from `languages.json` directly against the host's installed toolchains.
+
+**This is experimental and has only been verified to compile (including cross-compiled for Linux), not run end-to-end** — this repo is developed on macOS, which has no namespaces/cgroups to test against. Try it on a disposable Linux box before trusting it with real traffic.
+
+**Read before using — this is not a drop-in replacement for the Docker backend:**
+- **No filesystem jail.** Unlike Docker, there's no chroot or per-language rootfs — sandboxed code can read most of the host filesystem, subject to normal Unix file permissions. It's contained on process tree, network, and resource axes, not filesystem visibility.
+- **Requires toolchains on the host.** Since there's no per-language container image, whatever `languages.json` expects (`python3`, `gcc`, `node`, etc.) must already be installed on the machine running the worker.
+- **Requires cgroup v2 delegation.** The worker needs write access to `/sys/fs/cgroup/cee` — either run it as root, or delegate that subtree to its user (e.g. via a systemd unit with `Delegate=yes`).
+- **Linux only.** `internal/sandbox/native_linux.go` is behind a `//go:build linux` tag; on any other OS, selecting this backend fails fast at startup with a clear error.
+
+Use `NATIVE_UID`/`NATIVE_GID` to drop the sandboxed process to an unprivileged, dedicated system user before exec — this is the main mitigation for the lack of a filesystem jail, so don't run the worker (or the sandboxed code) as root in practice without it.
+
+When it's a good fit: lower per-job overhead (no container create/start/teardown, no image pulls) for trusted or semi-trusted workloads where you control what languages/code run. When it isn't: multi-tenant, untrusted, public-facing execution — use the Docker backend (optionally with gVisor, below) there instead.
 
 ---
 
