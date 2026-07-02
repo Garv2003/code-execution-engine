@@ -3,7 +3,7 @@ BINARY_NAME=server
 BUILD_DIR=bin
 CMD_DIR=./cmd/server
 
-.PHONY: all build run test clean lint redis-start redis-stop help
+.PHONY: all build run playground backend worker both test clean lint redis-start redis-stop help
 
 all: build
 
@@ -17,6 +17,22 @@ build:
 run:
 	@echo "Running $(BINARY_NAME)..."
 	@go run $(CMD_DIR)
+
+## playground: Start API+worker and open playground
+playground:
+	@./scripts/start-playground.sh
+
+## backend: Run API server only
+backend:
+	@./scripts/run-backend.sh
+
+## worker: Run worker only
+worker:
+	@./scripts/run-worker.sh
+
+## both: Run API and worker in one process
+both:
+	@./scripts/run-both.sh
 
 ## test: Run unit tests
 test:

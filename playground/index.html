@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Execution Engine — Playground</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #1c2128;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-green: #3fb950;
+            --accent-green-dim: #238636;
+            --accent-blue: #58a6ff;
+            --accent-orange: #d29922;
+            --accent-red: #f85149;
+            --accent-purple: #bc8cff;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        select {
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        select:hover { border-color: var(--accent-blue); }
+
+        .btn-run {
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--accent-green-dim);
+            color: #fff;
+            border: 1px solid var(--accent-green);
+            border-radius: 6px;
+            padding: 8px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-run:hover { background: var(--accent-green); transform: translateY(-1px); }
+        .btn-run:active { transform: translateY(0); }
+        .btn-run:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .btn-run .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            display: none;
+        }
+
+        .btn-run.loading .spinner { display: block; }
+        .btn-run.loading .play-icon { display: none; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .main-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            overflow: hidden;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel:first-child { border-right: 1px solid var(--border); }
+
+        .panel-header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .dot-green { background: var(--accent-green); }
+        .dot-blue { background: var(--accent-blue); }
+
+        textarea {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: none;
+            padding: 16px;
+            resize: none;
+            outline: none;
+            tab-size: 4;
+        }
+
+        textarea::placeholder { color: var(--text-secondary); }
+
+        .output-area {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            background: var(--bg-primary);
+            color: var(--accent-green);
+            padding: 16px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .output-area.error { color: var(--accent-red); }
+
+        .output-area .waiting {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .stdin-section {
+            border-top: 1px solid var(--border);
+        }
+
+        .stdin-section textarea {
+            height: 80px;
+            flex: none;
+            border-top: 1px solid var(--border);
+            background: var(--bg-secondary);
+            font-size: 13px;
+        }
+
+        footer {
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            padding: 10px 24px;
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-value.success { color: var(--accent-green); }
+        .stat-value.error { color: var(--accent-red); }
+        .stat-value.warn { color: var(--accent-orange); }
+
+        .status-badge {
+            margin-left: auto;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-idle { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .status-running { background: rgba(56,139,253,0.15); color: var(--accent-blue); }
+        .status-success { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+        .status-error { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+
+        @media (max-width: 768px) {
+            .main-container { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+            .panel:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">⚡ CODE EXECUTION ENGINE</div>
+        <div class="controls">
+            <select id="language"></select>
+            <button class="btn-run" id="runBtn" onclick="submitCode()">
+                <span class="play-icon">▶</span>
+                <div class="spinner"></div>
+                Run Code
+            </button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="panel">
+            <div class="panel-header"><span class="dot dot-green"></span> Editor</div>
+            <textarea id="codeEditor" placeholder="Write your code here..." spellcheck="false">print("Hello, World!")</textarea>
+            <div class="stdin-section">
+                <div class="panel-header"><span class="dot dot-blue"></span> Standard Input (stdin)</div>
+                <textarea id="stdinInput" placeholder="Optional: Enter input data..." spellcheck="false"></textarea>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><span class="dot dot-blue"></span> Output</div>
+            <div class="output-area" id="output"><span class="waiting">Run your code to see the output here...</span></div>
+        </div>
+    </div>
+
+    <footer>
+        <div class="stat">Time: <span class="stat-value" id="timeUsed">—</span></div>
+        <div class="stat">Memory: <span class="stat-value" id="memUsed">—</span></div>
+        <div class="stat">Exit Code: <span class="stat-value" id="exitCode">—</span></div>
+        <span class="status-badge status-idle" id="statusBadge">IDLE</span>
+    </footer>
+
+    <script>
+        let API_BASE = window.location.origin;
+        let defaultCode = {};
+
+        document.getElementById("language").addEventListener("change", function() {
+            document.getElementById("codeEditor").value = defaultCode[this.value] || "";
+        });
+
+        document.addEventListener("keydown", function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                submitCode();
+            }
+        });
+
+        function setStatus(status, text) {
+            const badge = document.getElementById("statusBadge");
+            badge.className = "status-badge status-" + status;
+            badge.textContent = text;
+        }
+
+        async function loadPlaygroundConfig() {
+            const languageSelect = document.getElementById("language");
+
+            try {
+                const res = await fetch("config.json", { cache: "no-store" });
+                if (!res.ok) {
+                    throw new Error("Failed to load playground config");
+                }
+
+                const config = await res.json();
+                API_BASE = config.api_base || window.location.origin;
+                defaultCode = {};
+                languageSelect.innerHTML = "";
+
+                Object.entries(config.languages || {}).forEach(([id, language]) => {
+                    const option = document.createElement("option");
+                    option.value = id;
+                    option.textContent = language.label || id;
+                    languageSelect.appendChild(option);
+                    defaultCode[id] = language.default_code || "";
+                });
+
+                const firstLanguage = languageSelect.options[0]?.value;
+                if (firstLanguage) {
+                    languageSelect.value = firstLanguage;
+                    document.getElementById("codeEditor").value = defaultCode[firstLanguage] || "";
+                }
+            } catch (err) {
+                languageSelect.innerHTML = '<option value="python">Python</option>';
+                defaultCode = { python: 'print("Hello, World!")' };
+                document.getElementById("codeEditor").value = defaultCode.python;
+                setStatus("error", "CONFIG ERROR");
+            }
+        }
+
+        async function submitCode() {
+            const btn = document.getElementById("runBtn");
+            const output = document.getElementById("output");
+            const code = document.getElementById("codeEditor").value;
+            const language = document.getElementById("language").value;
+            const stdin = document.getElementById("stdinInput").value;
+
+            if (!code.trim()) {
+                output.innerHTML = '<span class="waiting">Please enter some code to run.</span>';
+                return;
+            }
+
+            btn.classList.add("loading");
+            btn.disabled = true;
+            output.textContent = "";
+            setStatus("running", "SUBMITTING");
+
+            document.getElementById("timeUsed").textContent = "—";
+            document.getElementById("timeUsed").className = "stat-value";
+            document.getElementById("memUsed").textContent = "—";
+            document.getElementById("memUsed").className = "stat-value";
+            document.getElementById("exitCode").textContent = "—";
+            document.getElementById("exitCode").className = "stat-value";
+
+            try {
+                const submitRes = await fetch(API_BASE + "/submit", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ language, code, stdin })
+                });
+
+                if (!submitRes.ok) {
+                    const errData = await submitRes.json();
+                    throw new Error(errData.error || "Submission failed");
+                }
+
+                const { id } = await submitRes.json();
+                output.textContent = "Job queued: " + id + "\nWaiting for result...\n\n";
+                setStatus("running", "RUNNING");
+
+                const eventSource = new EventSource(API_BASE + "/result/" + id);
+
+                eventSource.onmessage = function(event) {
+                    const data = event.data;
+                    let shouldClose = false;
+
+                    try {
+                        const result = JSON.parse(data);
+
+                        if (result.status === "subscribed") {
+                            return;
+                        }
+
+                        if (Object.prototype.hasOwnProperty.call(result, "exit_code") || result.timeout || result.oom) {
+                            output.textContent = "";
+
+                            if (result.stdout) {
+                                output.textContent += result.stdout;
+                            }
+
+                            if (result.stderr) {
+                                output.textContent += "\n[STDERR]\n" + result.stderr;
+                                output.classList.add("error");
+                            } else {
+                                output.classList.remove("error");
+                            }
+
+                            if (!result.stdout && !result.stderr) {
+                                output.textContent = "[no output]";
+                            }
+
+                            if (result.timeout) {
+                                output.textContent += "\nTIMEOUT: Execution exceeded time limit.";
+                                output.classList.add("error");
+                                setStatus("error", "TIMEOUT");
+                            } else if (result.oom) {
+                                output.textContent += "\nOOM: Out of memory.";
+                                output.classList.add("error");
+                                setStatus("error", "OOM KILLED");
+                            } else if (result.exit_code === 0) {
+                                setStatus("success", "SUCCESS");
+                            } else {
+                                setStatus("error", "EXIT " + result.exit_code);
+                            }
+
+                            const timeMs = result.time_used ? (result.time_used / 1000000).toFixed(1) : "—";
+                            const memMB = result.memory_used_bytes ? (result.memory_used_bytes / (1024*1024)).toFixed(1) + " MB" : "—";
+                            const exitEl = document.getElementById("exitCode");
+
+                            document.getElementById("timeUsed").textContent = timeMs + " ms";
+                            document.getElementById("timeUsed").className = "stat-value success";
+                            document.getElementById("memUsed").textContent = memMB;
+                            document.getElementById("memUsed").className = "stat-value";
+
+                            exitEl.textContent = result.exit_code;
+                            exitEl.className = result.exit_code === 0 ? "stat-value success" : "stat-value error";
+                            shouldClose = true;
+                        }
+                    } catch (e) {
+                        output.textContent += data + "\n";
+                    }
+
+                    if (shouldClose) {
+                        eventSource.close();
+                        btn.classList.remove("loading");
+                        btn.disabled = false;
+                    }
+                };
+
+                eventSource.onerror = function() {
+                    eventSource.close();
+                    if (output.textContent.includes("Waiting")) {
+                        output.textContent = "Connection lost. Please try again.";
+                        output.classList.add("error");
+                        setStatus("error", "DISCONNECTED");
+                    }
+                    btn.classList.remove("loading");
+                    btn.disabled = false;
+                };
+
+            } catch (err) {
+                output.textContent = "Error: " + err.message;
+                output.classList.add("error");
+                setStatus("error", "FAILED");
+                btn.classList.remove("loading");
+                btn.disabled = false;
+            }
+        }
+
+        loadPlaygroundConfig();
+    </script>
+</body>
+</html>

@@ -5,26 +5,43 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
-	Port              string
-	MaxWorkers        int
-	DockerTimeoutMS   int
-	RedisURL          string
-	DockerMemoryLimit string
-	DockerCPUPeriod   int64
-	DockerCPUQuota    int64
+	Port               string
+	MaxWorkers         int
+	DockerTimeoutMS    int
+	RedisURL           string
+	LanguageConfig     string
+	PlaygroundEnabled  bool
+	PlaygroundDir      string
+	PrePullImages      bool
+	PrePullLanguages   []string
+	RateLimitRPM       int
+	CORSAllowedOrigins []string
+	CORSAllowedMethods []string
+	CORSAllowedHeaders []string
+	DockerMemoryLimit  string
+	DockerCPUPeriod    int64
+	DockerCPUQuota     int64
 }
 
 func Load() (*Config, error) {
 	port := getEnv("PORT", "8080")
 	redisURL := getEnv("REDIS_URL", "redis://localhost:6379")
+	languageConfig := getEnv("LANGUAGES_CONFIG", "languages.json")
+	playgroundDir := getEnv("PLAYGROUND_DIR", "playground")
 	dockerMemLimit := getEnv("DOCKER_MEMORY_LIMIT", "128m")
 
 	maxWorkers, err := getEnvInt("MAX_WORKERS", 10)
 	if err != nil {
 		return nil, fmt.Errorf("invalid MAX_WORKERS: %w", err)
+	}
+
+	rateLimitRPM, err := getEnvInt("RATE_LIMIT_RPM", 60)
+	if err != nil {
+		return nil, fmt.Errorf("invalid RATE_LIMIT_RPM: %w", err)
 	}
 
 	dockerTimeout, err := getEnvInt("DOCKER_TIMEOUT_MS", 5000)
@@ -43,13 +60,22 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:              port,
-		MaxWorkers:        maxWorkers,
-		DockerTimeoutMS:   dockerTimeout,
-		RedisURL:          redisURL,
-		DockerMemoryLimit: dockerMemLimit,
-		DockerCPUPeriod:   dockerCPUPeriod,
-		DockerCPUQuota:    dockerCPUQuota,
+		Port:               port,
+		MaxWorkers:         maxWorkers,
+		DockerTimeoutMS:    dockerTimeout,
+		RedisURL:           redisURL,
+		LanguageConfig:     languageConfig,
+		PlaygroundEnabled:  getEnvBool("PLAYGROUND_ENABLED", true),
+		PlaygroundDir:      playgroundDir,
+		PrePullImages:      getEnvBool("PRE_PULL_IMAGES", true),
+		PrePullLanguages:   getEnvCSV("PRE_PULL_LANGUAGES", ""),
+		RateLimitRPM:       rateLimitRPM,
+		CORSAllowedOrigins: getEnvCSV("CORS_ALLOWED_ORIGINS", "*"),
+		CORSAllowedMethods: getEnvCSV("CORS_ALLOWED_METHODS", "GET,POST,OPTIONS"),
+		CORSAllowedHeaders: getEnvCSV("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"),
+		DockerMemoryLimit:  dockerMemLimit,
+		DockerCPUPeriod:    dockerCPUPeriod,
+		DockerCPUQuota:     dockerCPUQuota,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -59,7 +85,6 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// Validate ensures the parsed configuration is valid.
 func (c *Config) Validate() error {
 	if c.MaxWorkers <= 0 {
 		return errors.New("MAX_WORKERS must be greater than 0")
@@ -69,6 +94,15 @@ func (c *Config) Validate() error {
 	}
 	if c.RedisURL == "" {
 		return errors.New("REDIS_URL cannot be empty")
+	}
+	if c.LanguageConfig == "" {
+		return errors.New("LANGUAGES_CONFIG cannot be empty")
+	}
+	if c.PlaygroundEnabled && c.PlaygroundDir == "" {
+		return errors.New("PLAYGROUND_DIR cannot be empty when playground is enabled")
+	}
+	if c.RateLimitRPM < 0 {
+		return errors.New("RATE_LIMIT_RPM cannot be negative")
 	}
 	return nil
 }
@@ -102,4 +136,29 @@ func getEnvInt64(key string, defaultValue int64) (int64, error) {
 		return 0, err
 	}
 	return val, nil
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	valStr, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
+	}
+	val, err := strconv.ParseBool(valStr)
+	if err != nil {
+		return defaultValue
+	}
+	return val
+}
+
+func getEnvCSV(key string, defaultValue string) []string {
+	valStr := getEnv(key, defaultValue)
+	parts := strings.Split(valStr, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }

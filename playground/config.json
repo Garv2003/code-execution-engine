@@ -1,0 +1,85 @@
+{
+  "api_base": "",
+  "languages": {
+    "python": {
+      "label": "Python",
+      "default_code": "print(\"Hello, World!\")"
+    },
+    "golang": {
+      "label": "Go",
+      "default_code": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}"
+    },
+    "cpp": {
+      "label": "C++",
+      "default_code": "#include <iostream>\n\nint main() {\n\tstd::cout << \"Hello, World!\" << std::endl;\n\treturn 0;\n}"
+    },
+    "c": {
+      "label": "C",
+      "default_code": "#include <stdio.h>\n\nint main() {\n\tprintf(\"Hello, World!\\n\");\n\treturn 0;\n}"
+    },
+    "javascript": {
+      "label": "JavaScript",
+      "default_code": "console.log(\"Hello, World!\")"
+    },
+    "typescript": {
+      "label": "TypeScript",
+      "default_code": "console.log(\"Hello, World!\")"
+    },
+    "java": {
+      "label": "Java",
+      "default_code": "public class Solution {\n\tpublic static void main(String[] args) {\n\t\tSystem.out.println(\"Hello, World!\");\n\t}\n}"
+    },
+    "rust": {
+      "label": "Rust",
+      "default_code": "fn main() {\n\tprintln!(\"Hello, World!\");\n}"
+    },
+    "ruby": {
+      "label": "Ruby",
+      "default_code": "puts \"Hello, World!\""
+    },
+    "php": {
+      "label": "PHP",
+      "default_code": "<?php echo \"Hello, World!\\n\"; ?>"
+    },
+    "bash": {
+      "label": "Bash",
+      "default_code": "echo \"Hello, World!\""
+    },
+    "perl": {
+      "label": "Perl",
+      "default_code": "print \"Hello, World!\\n\";"
+    },
+    "lua": {
+      "label": "Lua",
+      "default_code": "print(\"Hello, World!\")"
+    },
+    "dart": {
+      "label": "Dart",
+      "default_code": "void main() {\n  print('Hello, World!');\n}"
+    },
+    "julia": {
+      "label": "Julia",
+      "default_code": "println(\"Hello, World!\")"
+    },
+    "r": {
+      "label": "R",
+      "default_code": "cat(\"Hello, World!\\n\")"
+    },
+    "elixir": {
+      "label": "Elixir",
+      "default_code": "IO.puts(\"Hello, World!\")"
+    },
+    "erlang": {
+      "label": "Erlang",
+      "default_code": "-module(solution).\n-export([main/0]).\n\nmain() ->\n    io:format(\"Hello, World!~n\")."
+    },
+    "clojure": {
+      "label": "Clojure",
+      "default_code": "(println \"Hello, World!\")"
+    },
+    "haskell": {
+      "label": "Haskell",
+      "default_code": "main :: IO ()\nmain = putStrLn \"Hello, World!\""
+    }
+  }
+}
