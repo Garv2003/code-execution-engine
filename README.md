@@ -88,6 +88,17 @@ export PORT=8080
 go run ./cmd/server
 ```
 
+Development scripts:
+
+```bash
+./scripts/start-playground.sh  # API + worker, then opens /playground/
+./scripts/run-backend.sh       # API only
+./scripts/run-worker.sh        # worker only
+./scripts/run-both.sh          # API + worker without opening browser
+```
+
+The same commands are also available as `make playground`, `make backend`, `make worker`, and `make both`.
+
 Submit a job:
 
 ```bash
@@ -117,6 +128,15 @@ curl -N http://localhost:8080/result/abc123
 | `DOCKER_MEMORY_LIMIT` | `128m` | Container memory cap |
 | `DOCKER_CPU_PERIOD` | `100000` | Docker CPU period for quota enforcement |
 | `DOCKER_CPU_QUOTA` | `50000` | CPU quota (50000/100000 = 0.5 core per container) |
+| `LANGUAGES_CONFIG` | `languages.json` | JSON file containing language image and command definitions |
+| `RATE_LIMIT_RPM` | `60` | Requests per minute per client IP; set `0` to disable |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated allowed origins |
+| `CORS_ALLOWED_METHODS` | `GET,POST,OPTIONS` | Comma-separated allowed methods |
+| `CORS_ALLOWED_HEADERS` | `Content-Type,Authorization` | Comma-separated allowed headers |
+| `PLAYGROUND_ENABLED` | `true` | Serve the static playground at `/playground/` |
+| `PLAYGROUND_DIR` | `playground` | Directory used by the static playground server |
+| `PRE_PULL_IMAGES` | `true` | Pre-pull sandbox images on worker startup |
+| `PRE_PULL_LANGUAGES` | empty | Comma-separated language IDs to pre-pull; empty means all |
 
 ---
 
