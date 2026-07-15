@@ -9,6 +9,7 @@ type ExecutionResult struct {
 	ExitCode   int           `json:"exit_code"`
 	TimeUsed   time.Duration `json:"time_used"`
 	MemoryUsed int64         `json:"memory_used_bytes"`
-	Timeout    bool          `json:"timeout"`
-	OOM        bool          `json:"oom"`
+	Timeout         bool `json:"timeout"`
+	OOM             bool `json:"oom"`
+	OutputTruncated bool `json:"output_truncated"`
 }
