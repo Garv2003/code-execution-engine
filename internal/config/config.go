@@ -28,6 +28,10 @@ type Config struct {
 	DockerCPUQuota     int64
 	DockerRuntime      string
 	DatabaseURL        string
+	SandboxBackend     string
+	NativeWorkDir      string
+	NativeUID          int
+	NativeGID          int
 }
 
 func Load() (*Config, error) {
@@ -62,6 +66,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid DOCKER_CPU_QUOTA: %w", err)
 	}
 
+	nativeUID, err := getEnvInt("NATIVE_UID", 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid NATIVE_UID: %w", err)
+	}
+
+	nativeGID, err := getEnvInt("NATIVE_GID", 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid NATIVE_GID: %w", err)
+	}
+
 	cfg := &Config{
 		Port:               port,
 		MaxWorkers:         maxWorkers,
@@ -82,6 +96,10 @@ func Load() (*Config, error) {
 		DockerCPUQuota:     dockerCPUQuota,
 		DockerRuntime:      getEnv("DOCKER_RUNTIME", ""),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
+		SandboxBackend:     getEnv("SANDBOX_BACKEND", "docker"),
+		NativeWorkDir:      getEnv("NATIVE_WORKDIR", ""),
+		NativeUID:          nativeUID,
+		NativeGID:          nativeGID,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -109,6 +127,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitRPM < 0 {
 		return errors.New("RATE_LIMIT_RPM cannot be negative")
+	}
+	if c.SandboxBackend != "docker" && c.SandboxBackend != "native" {
+		return errors.New("SANDBOX_BACKEND must be either 'docker' or 'native'")
 	}
 	return nil
 }
