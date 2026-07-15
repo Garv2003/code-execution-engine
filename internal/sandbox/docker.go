@@ -16,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
@@ -191,9 +192,19 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 			Memory:         memoryLimit,
 			CPUPeriod:      s.cfg.DockerCPUPeriod,
 			CPUQuota:       s.cfg.DockerCPUQuota,
+			PidsLimit:      int64Ptr(s.cfg.DockerPidsLimit),
 			OomKillDisable: boolPtr(false),
 		},
-		NetworkMode: "none",
+		NetworkMode:    "none",
+		CapDrop:        strslice.StrSlice{"ALL"},
+		SecurityOpt:    []string{"no-new-privileges"},
+		ReadonlyRootfs: s.cfg.DockerReadonlyRootfs,
+	}
+
+	if s.cfg.DockerReadonlyRootfs {
+		hostConfig.Tmpfs = map[string]string{
+			"/tmp": fmt.Sprintf("rw,size=%dm", s.cfg.DockerTmpfsSizeMB),
+		}
 	}
 
 	if s.cfg.DockerRuntime != "" {
@@ -261,7 +272,8 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		}()
 	}
 
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := newCappedBuffer(int(s.cfg.MaxOutputBytes))
+	stderrBuf := newCappedBuffer(int(s.cfg.MaxOutputBytes))
 	outputDone := make(chan error, 1)
 
 	if job.Stdin != "" {
@@ -272,7 +284,7 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 	}
 
 	go func() {
-		_, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, attachResp.Reader)
+		_, err := stdcopy.StdCopy(stdoutBuf, stderrBuf, attachResp.Reader)
 		outputDone <- err
 	}()
 
@@ -309,19 +321,47 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 	isOom := inspect.State.OOMKilled
 
 	return &models.ExecutionResult{
-		ID:         job.ID,
-		Stdout:     stdoutBuf.String(),
-		Stderr:     stderrBuf.String(),
-		ExitCode:   int(waitStatus.StatusCode),
-		TimeUsed:   duration,
-		OOM:        isOom,
-		Timeout:    false,
-		MemoryUsed: int64(maxMemory.Load()),
+		ID:              job.ID,
+		Stdout:          stdoutBuf.String(),
+		Stderr:          stderrBuf.String(),
+		ExitCode:        int(waitStatus.StatusCode),
+		TimeUsed:        duration,
+		OOM:             isOom,
+		Timeout:         false,
+		MemoryUsed:      int64(maxMemory.Load()),
+		OutputTruncated: stdoutBuf.truncated || stderrBuf.truncated,
 	}, nil
 }
 
-func boolPtr(b bool) *bool { return &b }
-func intPtr(i int) *int    { return &i }
+func boolPtr(b bool) *bool    { return &b }
+func intPtr(i int) *int       { return &i }
+func int64Ptr(i int64) *int64 { return &i }
+
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newCappedBuffer(limit int) *cappedBuffer {
+	return &cappedBuffer{limit: limit}
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	remaining := c.limit - c.buf.Len()
+	if remaining <= 0 {
+		c.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		c.buf.Write(p[:remaining])
+		c.truncated = true
+		return len(p), nil
+	}
+	return c.buf.Write(p)
+}
+
+func (c *cappedBuffer) String() string { return c.buf.String() }
 
 func (s *DockerSandbox) ensureImage(ctx context.Context, language string, imageName string) error {
 	_, _, err := s.cli.ImageInspectWithRaw(ctx, imageName)
