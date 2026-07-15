@@ -23,11 +23,15 @@ type Config struct {
 	CORSAllowedOrigins []string
 	CORSAllowedMethods []string
 	CORSAllowedHeaders []string
-	DockerMemoryLimit  string
-	DockerCPUPeriod    int64
-	DockerCPUQuota     int64
-	DockerRuntime      string
-	DatabaseURL        string
+	DockerMemoryLimit    string
+	DockerCPUPeriod      int64
+	DockerCPUQuota       int64
+	DockerPidsLimit      int64
+	DockerReadonlyRootfs bool
+	DockerTmpfsSizeMB    int64
+	MaxOutputBytes       int64
+	DockerRuntime        string
+	DatabaseURL          string
 }
 
 func Load() (*Config, error) {
@@ -62,6 +66,21 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid DOCKER_CPU_QUOTA: %w", err)
 	}
 
+	dockerPidsLimit, err := getEnvInt64("DOCKER_PIDS_LIMIT", 256)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DOCKER_PIDS_LIMIT: %w", err)
+	}
+
+	dockerTmpfsSizeMB, err := getEnvInt64("DOCKER_TMPFS_SIZE_MB", 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DOCKER_TMPFS_SIZE_MB: %w", err)
+	}
+
+	maxOutputBytes, err := getEnvInt64("MAX_OUTPUT_BYTES", 1048576)
+	if err != nil {
+		return nil, fmt.Errorf("invalid MAX_OUTPUT_BYTES: %w", err)
+	}
+
 	cfg := &Config{
 		Port:               port,
 		MaxWorkers:         maxWorkers,
@@ -77,11 +96,15 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: getEnvCSV("CORS_ALLOWED_ORIGINS", "*"),
 		CORSAllowedMethods: getEnvCSV("CORS_ALLOWED_METHODS", "GET,POST,OPTIONS"),
 		CORSAllowedHeaders: getEnvCSV("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"),
-		DockerMemoryLimit:  dockerMemLimit,
-		DockerCPUPeriod:    dockerCPUPeriod,
-		DockerCPUQuota:     dockerCPUQuota,
-		DockerRuntime:      getEnv("DOCKER_RUNTIME", ""),
-		DatabaseURL:        getEnv("DATABASE_URL", ""),
+		DockerMemoryLimit:    dockerMemLimit,
+		DockerCPUPeriod:      dockerCPUPeriod,
+		DockerCPUQuota:       dockerCPUQuota,
+		DockerPidsLimit:      dockerPidsLimit,
+		DockerReadonlyRootfs: getEnvBool("DOCKER_READONLY_ROOTFS", false),
+		DockerTmpfsSizeMB:    dockerTmpfsSizeMB,
+		MaxOutputBytes:       maxOutputBytes,
+		DockerRuntime:        getEnv("DOCKER_RUNTIME", ""),
+		DatabaseURL:          getEnv("DATABASE_URL", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -109,6 +132,15 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitRPM < 0 {
 		return errors.New("RATE_LIMIT_RPM cannot be negative")
+	}
+	if c.DockerPidsLimit <= 0 {
+		return errors.New("DOCKER_PIDS_LIMIT must be greater than 0")
+	}
+	if c.MaxOutputBytes <= 0 {
+		return errors.New("MAX_OUTPUT_BYTES must be greater than 0")
+	}
+	if c.DockerReadonlyRootfs && c.DockerTmpfsSizeMB <= 0 {
+		return errors.New("DOCKER_TMPFS_SIZE_MB must be greater than 0 when DOCKER_READONLY_ROOTFS is enabled")
 	}
 	return nil
 }
