@@ -131,27 +131,87 @@ docker compose up --build
 | `LANGUAGES_CONFIG` | `languages.json` | Path to language definitions |
 | `DOCKER_TIMEOUT_MS` | `5000` | Default execution timeout |
 | `DOCKER_MEMORY_LIMIT` | `128m` | Container memory cap |
-| `DOCKER_CPU_PERIOD` / `DOCKER_CPU_QUOTA` | `100000` / `50000` | CPU throttling |
-| `DOCKER_RUNTIME` | _(empty)_ | e.g. `runsc` for gVisor |
-| `RATE_LIMIT_RPM` | `60` | Per-IP requests/minute (0 disables) |
-| `API_KEYS` | _(empty)_ | Comma-separated keys (empty disables auth) |
-| `CORS_ALLOWED_ORIGINS` / `_METHODS` / `_HEADERS` | `*` / `GET,POST,OPTIONS` / `Content-Type,Authorization` | CORS policy |
-| `PRE_PULL_IMAGES` | `true` | Pre-pull images on worker start |
-| `PRE_PULL_LANGUAGES` | _(all)_ | Subset to pre-pull |
-| `PLAYGROUND_ENABLED` / `PLAYGROUND_DIR` | `true` / `playground` | Static playground |
+| `DOCKER_CPU_PERIOD` | `100000` | Docker CPU period for quota enforcement |
+| `DOCKER_CPU_QUOTA` | `50000` | CPU quota (50000/100000 = 0.5 core per container) |
+| `LANGUAGES_CONFIG` | `languages.json` | JSON file containing language image and command definitions |
+| `RATE_LIMIT_RPM` | `60` | Requests per minute per client IP; set `0` to disable |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated allowed origins |
+| `CORS_ALLOWED_METHODS` | `GET,POST,OPTIONS` | Comma-separated allowed methods |
+| `CORS_ALLOWED_HEADERS` | `Content-Type,Authorization` | Comma-separated allowed headers |
+| `PLAYGROUND_ENABLED` | `true` | Serve the static playground at `/playground/` |
+| `PLAYGROUND_DIR` | `playground` | Directory used by the static playground server |
+| `PRE_PULL_IMAGES` | `true` | Pre-pull sandbox images on worker startup |
+| `PRE_PULL_LANGUAGES` | empty | Comma-separated language IDs to pre-pull; empty means all |
+| `DATABASE_URL` | empty | Postgres connection string; when set, job history is persisted and `/dashboard/jobs` is enabled |
+| `API_KEYS` | empty | Comma-separated API keys; when set, all routes except `/health` and `/playground/*` require a matching `X-API-Key` header or `api_key` query param |
+| `DOCKER_RUNTIME` | empty | Docker runtime to use for containers (e.g. `runsc`); empty uses the daemon default |
+| `SANDBOX_BACKEND` | `docker` | `docker` or `native` (experimental) — see "Sandbox Backends: Native" below |
+| `NATIVE_WORKDIR` | OS temp dir | Native backend only — base directory for per-job temp directories |
+| `NATIVE_UID` / `NATIVE_GID` | `0` | Native backend only — UID/GID to drop the sandboxed process to; requires the worker to run as root |
 
-### Endpoints
+---
 
-| Method & path | Description |
-|---|---|
-| `GET /health` | Liveness probe, returns `OK` |
-| `POST /submit` | Enqueue a job; returns `202 {"id","status":"queued"}` |
-| `GET /result/{id}` | SSE stream; emits the execution result as `data: <json>` |
-| `GET /jobs/{id}` | Current job record (status/result) as JSON |
-| `GET /dashboard/jobs?limit=N` | Recent jobs from Postgres (requires `DATABASE_URL`; else `501`) |
-| `GET /playground/` | Static playground UI (when enabled) |
+## Sandbox Backends: Native (Experimental)
 
-### Submit example
+`SANDBOX_BACKEND=native` runs jobs directly on the host instead of in Docker containers — no daemon, no `docker.sock`, no images. It isolates each job using Linux namespaces (PID, mount, network, UTS, IPC) and enforces memory/CPU/PID-count limits via cgroups v2, then executes the language's existing `run_command`/`compile_command` from `languages.json` directly against the host's installed toolchains.
+
+**This is experimental and has only been verified to compile (including cross-compiled for Linux), not run end-to-end** — this repo is developed on macOS, which has no namespaces/cgroups to test against. Try it on a disposable Linux box before trusting it with real traffic.
+
+**Read before using — this is not a drop-in replacement for the Docker backend:**
+- **No filesystem jail.** Unlike Docker, there's no chroot or per-language rootfs — sandboxed code can read most of the host filesystem, subject to normal Unix file permissions. It's contained on process tree, network, and resource axes, not filesystem visibility.
+- **Requires toolchains on the host.** Since there's no per-language container image, whatever `languages.json` expects (`python3`, `gcc`, `node`, etc.) must already be installed on the machine running the worker.
+- **Requires cgroup v2 delegation.** The worker needs write access to `/sys/fs/cgroup/cee` — either run it as root, or delegate that subtree to its user (e.g. via a systemd unit with `Delegate=yes`).
+- **Linux only.** `internal/sandbox/native_linux.go` is behind a `//go:build linux` tag; on any other OS, selecting this backend fails fast at startup with a clear error.
+
+Use `NATIVE_UID`/`NATIVE_GID` to drop the sandboxed process to an unprivileged, dedicated system user before exec — this is the main mitigation for the lack of a filesystem jail, so don't run the worker (or the sandboxed code) as root in practice without it.
+
+When it's a good fit: lower per-job overhead (no container create/start/teardown, no image pulls) for trusted or semi-trusted workloads where you control what languages/code run. When it isn't: multi-tenant, untrusted, public-facing execution — use the Docker backend (optionally with gVisor, below) there instead.
+
+---
+
+## Sandbox Runtime: gVisor
+
+By default, containers run under the Docker daemon's normal `runc` runtime, which shares the host kernel. For stronger isolation against kernel-level exploits, point the sandbox at [gVisor](https://gvisor.dev)'s `runsc` runtime instead — the application code doesn't need to change, since `internal/sandbox/docker.go` already forwards `DOCKER_RUNTIME` to the container's `HostConfig.Runtime`.
+
+Setup (on the Docker host, not in this repo):
+
+1. Install gVisor: follow the [official install guide](https://gvisor.dev/docs/user_guide/install/) to get the `runsc` binary onto the host.
+2. Register it with Docker by adding a runtime entry to `/etc/docker/daemon.json`:
+   ```json
+   {
+     "runtimes": {
+       "runsc": {
+         "path": "/usr/local/bin/runsc"
+       }
+     }
+   }
+   ```
+3. Restart the Docker daemon: `sudo systemctl restart docker`.
+4. Set `DOCKER_RUNTIME=runsc` in your environment (or uncomment it in `docker-compose.yml`) and restart the worker.
+
+**Tradeoff:** gVisor intercepts syscalls in userspace, which adds CPU/IO overhead per execution in exchange for a much stronger sandbox boundary. Some syscalls used by less common language runtimes may be unsupported — verify with `make verify` after switching.
+
+---
+
+## Design Decisions
+
+### 1. Buffered channels for backpressure over unbounded goroutines
+
+Spawning one goroutine per submission is simple but collapses under load — goroutine count grows with request volume, and each goroutine holds memory and a Docker client handle.
+
+The worker pool with a fixed-size buffered channel inverts this: the pool size is a tunable constant, and the channel provides natural backpressure. When the channel is full, the server returns HTTP 429 immediately instead of silently queuing work it cannot service. This makes load behavior predictable and debuggable.
+
+### 2. Ephemeral containers over persistent runtimes
+
+Persistent sandboxes (e.g., a warm Python interpreter kept alive between submissions) are faster but create isolation risk — state leaks between users, file system contamination, and resource exhaustion within a single container are all real failure modes in a multi-tenant execution environment.
+
+Each submission gets a fresh container from a clean image. The startup cost is the tradeoff; it is paid once per submission and bounded by `DOCKER_TIMEOUT_MS`. The isolation guarantee is unconditional.
+
+### 3. SSE over WebSockets for one-way streaming
+
+WebSockets are full-duplex. For code execution output — which is strictly server-to-client after submission — the bidirectionality is overhead: more complex connection management, more difficult load balancer and proxy configuration, and no benefit for this use case.
+
+SSE is unidirectional, HTTP/1.1-compatible, and trivially handled by every reverse proxy. It delivers the same real-time streaming semantics with lower operational complexity. The reconnection and event ID semantics are also built into the protocol, which WebSockets leave to the application layer.
 
 ```bash
 curl -X POST http://localhost:8080/submit \

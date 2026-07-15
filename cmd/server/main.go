@@ -71,25 +71,39 @@ func main() {
 	var workerPool *worker.WorkerPool
 
 	if mode == "worker" || mode == "both" {
-		dockerSandbox, err := sandbox.NewDockerSandbox(cfg, langConfig)
-		if err != nil {
-			slog.Error("Docker client initialization failure", "error", err)
-			os.Exit(1)
-		}
+		var activeSandbox sandbox.Sandbox
 
-		if cfg.PrePullImages {
-			prePullLanguages := languagesList
-			if len(cfg.PrePullLanguages) > 0 {
-				prePullLanguages = cfg.PrePullLanguages
+		slog.Info("Selecting sandbox backend", "backend", cfg.SandboxBackend)
+		switch cfg.SandboxBackend {
+		case "native":
+			nativeSandbox, err := sandbox.NewNativeSandbox(cfg, langConfig)
+			if err != nil {
+				slog.Error("Native sandbox initialization failure", "error", err)
+				os.Exit(1)
 			}
-			go func() {
-				pullCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer cancel()
-				_ = dockerSandbox.PrePullImages(pullCtx, prePullLanguages)
-			}()
+			activeSandbox = nativeSandbox
+		default:
+			dockerSandbox, err := sandbox.NewDockerSandbox(cfg, langConfig)
+			if err != nil {
+				slog.Error("Docker client initialization failure", "error", err)
+				os.Exit(1)
+			}
+
+			if cfg.PrePullImages {
+				prePullLanguages := languagesList
+				if len(cfg.PrePullLanguages) > 0 {
+					prePullLanguages = cfg.PrePullLanguages
+				}
+				go func() {
+					pullCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					_ = dockerSandbox.PrePullImages(pullCtx, prePullLanguages)
+				}()
+			}
+			activeSandbox = dockerSandbox
 		}
 
-		workerPool = worker.NewWorkerPool(redisClient, dockerSandbox, pgDB, cfg.MaxWorkers)
+		workerPool = worker.NewWorkerPool(redisClient, activeSandbox, pgDB, cfg.MaxWorkers)
 		workerPool.Start()
 	}
 
