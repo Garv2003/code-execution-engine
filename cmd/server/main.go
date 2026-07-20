@@ -13,6 +13,7 @@ import (
 	"github.com/garv2003/code-execution-engine/internal/config"
 	"github.com/garv2003/code-execution-engine/internal/db"
 	"github.com/garv2003/code-execution-engine/internal/handler"
+	"github.com/garv2003/code-execution-engine/internal/metrics"
 	"github.com/garv2003/code-execution-engine/internal/middleware"
 	"github.com/garv2003/code-execution-engine/internal/pushsub"
 	"github.com/garv2003/code-execution-engine/internal/sandbox"
@@ -104,6 +105,7 @@ func main() {
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /health", healthHandler.Health)
+		mux.Handle("GET /metrics", metrics.Handler())
 		mux.HandleFunc("POST /submit", submitHandler.Submit)
 		mux.HandleFunc("GET /result/{id}", resultHandler.Result)
 		mux.HandleFunc("GET /jobs/{id}", jobHandler.Job)
