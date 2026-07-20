@@ -41,6 +41,10 @@ func (r *RedisClient) PushJob(ctx context.Context, job *models.Job) error {
 	return r.client.LPush(ctx, "cee:job_queue", data).Err()
 }
 
+func (r *RedisClient) JobQueueLength(ctx context.Context) (int64, error) {
+	return r.client.LLen(ctx, "cee:job_queue").Result()
+}
+
 func (r *RedisClient) PopJob(ctx context.Context) (*models.Job, error) {
 	results, err := r.client.BRPop(ctx, 0, "cee:job_queue").Result()
 	if err != nil {
