@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/garv2003/code-execution-engine/internal/db"
+	"github.com/garv2003/code-execution-engine/internal/metrics"
 	"github.com/garv2003/code-execution-engine/internal/models"
 	"github.com/garv2003/code-execution-engine/internal/pushsub"
 	"github.com/garv2003/code-execution-engine/internal/sandbox"
@@ -37,6 +38,30 @@ func (wp *WorkerPool) Start() {
 	for i := 0; i < wp.maxWorkers; i++ {
 		wp.wg.Add(1)
 		go wp.worker(i)
+	}
+	wp.wg.Add(1)
+	go wp.reportQueueDepth()
+}
+
+func (wp *WorkerPool) reportQueueDepth() {
+	defer wp.wg.Done()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-wp.shutdown:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			depth, err := wp.redisClient.JobQueueLength(ctx)
+			cancel()
+			if err != nil {
+				slog.Debug("Failed to read job queue depth", "error", err)
+				continue
+			}
+			metrics.QueueDepth.Set(float64(depth))
+		}
 	}
 }
 
@@ -71,7 +96,9 @@ func (wp *WorkerPool) worker(workerID int) {
 			}
 
 			runCtx, runCancel := context.WithTimeout(context.Background(), job.Timeout)
+			runStart := time.Now()
 			result, err := wp.sandbox.Run(runCtx, job)
+			metrics.JobExecutionSeconds.Observe(time.Since(runStart).Seconds())
 			runCancel()
 
 			finishedAt := time.Now().UTC()
@@ -82,6 +109,7 @@ func (wp *WorkerPool) worker(workerID int) {
 
 			if err != nil {
 				slog.Error("Failed execution run", "job_id", job.ID, "error", err)
+				metrics.JobsTotal.WithLabelValues(metrics.OutcomeFailed).Inc()
 				result = &models.ExecutionResult{
 					ID:       job.ID,
 					ExitCode: -1,
@@ -97,6 +125,11 @@ func (wp *WorkerPool) worker(workerID int) {
 					}
 				}
 			} else if result.Timeout || result.OOM {
+				if result.Timeout {
+					metrics.JobsTotal.WithLabelValues(metrics.OutcomeTimeout).Inc()
+				} else {
+					metrics.JobsTotal.WithLabelValues(metrics.OutcomeOOM).Inc()
+				}
 				if found {
 					record.Status = models.JobStatusFailed
 					if result.Timeout {
@@ -111,6 +144,7 @@ func (wp *WorkerPool) worker(workerID int) {
 					}
 				}
 			} else {
+				metrics.JobsTotal.WithLabelValues(metrics.OutcomeCompleted).Inc()
 				if found {
 					record.Status = models.JobStatusCompleted
 					if result.ExitCode != 0 {
