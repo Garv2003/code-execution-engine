@@ -32,6 +32,7 @@ type Config struct {
 	MaxOutputBytes       int64
 	DockerRuntime        string
 	DatabaseURL          string
+	SandboxBackend       string
 }
 
 func Load() (*Config, error) {
@@ -105,6 +106,7 @@ func Load() (*Config, error) {
 		MaxOutputBytes:       maxOutputBytes,
 		DockerRuntime:        getEnv("DOCKER_RUNTIME", ""),
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		SandboxBackend:       getEnv("SANDBOX_BACKEND", "docker"),
 	}
 
 	if err := cfg.Validate(); err != nil {
