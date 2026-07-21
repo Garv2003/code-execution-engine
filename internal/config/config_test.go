@@ -33,6 +33,49 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.RateLimitRPM != 60 {
 		t.Errorf("expected default rate limit 60, got %d", cfg.RateLimitRPM)
 	}
+	if cfg.WarmPoolEnabled {
+		t.Error("expected warm pool to be disabled by default")
+	}
+	if cfg.WarmPoolSize != 0 {
+		t.Errorf("expected default warm pool size 0, got %d", cfg.WarmPoolSize)
+	}
+}
+
+func TestLoad_WarmPoolEnabled(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("WARM_POOL_ENABLED", "true")
+	os.Setenv("WARM_POOL_SIZE", "3")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.WarmPoolEnabled {
+		t.Error("expected warm pool to be enabled")
+	}
+	if cfg.WarmPoolSize != 3 {
+		t.Errorf("expected warm pool size 3, got %d", cfg.WarmPoolSize)
+	}
+}
+
+func TestValidate_WarmPoolEnabledWithoutSize(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("WARM_POOL_ENABLED", "true")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Error("expected validation error when warm pool enabled with size 0, got nil")
+	}
+}
+
+func TestValidate_NegativeWarmPoolSize(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("WARM_POOL_SIZE", "-1")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Error("expected validation error for negative warm pool size, got nil")
+	}
 }
 
 func TestLoad_CustomValues(t *testing.T) {

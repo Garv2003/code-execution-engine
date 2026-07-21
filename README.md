@@ -150,6 +150,8 @@ docker compose up --build
 | `SANDBOX_BACKEND` | `docker` | `docker` or `native` (experimental) — see "Sandbox Backends: Native" below |
 | `NATIVE_WORKDIR` | OS temp dir | Native backend only — base directory for per-job temp directories |
 | `NATIVE_UID` / `NATIVE_GID` | `0` | Native backend only — UID/GID to drop the sandboxed process to; requires the worker to run as root |
+| `WARM_POOL_ENABLED` | `false` | OPTIONAL perf (docker backend). Keep pre-started hardened idle containers and run jobs via `docker exec` to cut create/start latency. Default off; see "Warm Container Pool" below |
+| `WARM_POOL_SIZE` | `0` | Idle warm containers to keep per hot language when the pool is enabled |
 
 ---
 
@@ -192,6 +194,18 @@ Setup (on the Docker host, not in this repo):
 4. Set `DOCKER_RUNTIME=runsc` in your environment (or uncomment it in `docker-compose.yml`) and restart the worker.
 
 **Tradeoff:** gVisor intercepts syscalls in userspace, which adds CPU/IO overhead per execution in exchange for a much stronger sandbox boundary. Some syscalls used by less common language runtimes may be unsupported — verify with `make verify` after switching.
+
+---
+
+## Warm Container Pool (Optional, Off by Default)
+
+`WARM_POOL_ENABLED=true` turns on an **opt-in latency optimization** for the Docker backend. It keeps `WARM_POOL_SIZE` pre-created, already-started, fully hardened idle containers per hot language (the `PRE_PULL_LANGUAGES` set, or all languages). A job then skips `ContainerCreate` + `ContainerStart` on the critical path.
+
+**Why a different exec model.** The default path bakes the code into a container whose `Cmd` runs it immediately, so that container can never be reused. A warm container is instead started with an idle `sleep` entrypoint, and the job's code is copied in and run via `docker exec` (`ContainerExecCreate` + `ContainerExecAttach`). All hardening is preserved on pooled containers (no network, cap-drop ALL, `no-new-privileges`, memory/CPU/PID limits, optional readonly rootfs + tmpfs), and the same bounded-output, stdin, timeout, and memory-stats handling applies.
+
+**Isolation trade-off.** Each pooled container runs **exactly one job** and is then destroyed, with a background refill creating its replacement — so a job never inherits another job's residue and isolation is effectively equivalent to create-per-run. The residual differences vs. the default path: the container was started (idle) before the job existed, code runs as a `docker exec` child rather than PID 1 (subtly different signal/reaping), and memory/OOM stats are read from the whole container (the idle `sleep` is negligible). Because the default create-per-run path is the most pristine, **the pool stays off by default.**
+
+> **Not validated against live Docker.** This path is compile-validated only in this repo. Exercise it end-to-end (create/exec/stats/timeout/OOM/clean shutdown) against a real daemon before enabling anywhere it matters.
 
 ---
 

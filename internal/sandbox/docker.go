@@ -44,6 +44,10 @@ type DockerSandbox struct {
 
 	verifiedMu sync.Mutex
 	verified   map[string]struct{}
+
+	// pool is non-nil only when WARM_POOL_ENABLED is set. When nil (the
+	// default), Run uses the pristine create-per-run path unchanged.
+	pool *warmPool
 }
 
 func LoadLanguageConfig(configPath string) (LanguageConfig, error) {
@@ -66,12 +70,39 @@ func NewDockerSandbox(cfg *config.Config, langs LanguageConfig) (*DockerSandbox,
 		return nil, err
 	}
 
-	return &DockerSandbox{
+	s := &DockerSandbox{
 		cli:       cli,
 		cfg:       cfg,
 		languages: langs,
 		verified:  make(map[string]struct{}),
-	}, nil
+	}
+
+	// OPT-IN: the warm container pool is a latency optimization that is only
+	// wired up when WARM_POOL_ENABLED is true. When disabled (the default),
+	// s.pool stays nil and Run behaves exactly as before (create-per-run).
+	if cfg.WarmPoolEnabled && cfg.WarmPoolSize > 0 {
+		s.pool = newWarmPool(s, cfg.WarmPoolSize)
+	}
+
+	return s, nil
+}
+
+// WarmUp pre-fills the warm container pool for the given languages. It is a
+// no-op unless the warm pool is enabled (WARM_POOL_ENABLED). Safe to call in a
+// goroutine.
+func (s *DockerSandbox) WarmUp(ctx context.Context, languages []string) {
+	if s.pool == nil {
+		return
+	}
+	s.pool.Warm(ctx, languages)
+}
+
+// Close tears down any warm-pool containers. Safe to call when the pool is
+// disabled (no-op) and safe to call more than once.
+func (s *DockerSandbox) Close() {
+	if s.pool != nil {
+		s.pool.Close()
+	}
 }
 
 func (s *DockerSandbox) isVerified(imageName string) bool {
@@ -174,30 +205,21 @@ func makeTarArchive(filename string, fileContent string, extraFiles map[string]s
 	return buf, nil
 }
 
-func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.ExecutionResult, error) {
-	spec, exists := s.languages[job.Language]
-	if !exists {
-		return nil, errors.New("unsupported language: " + job.Language)
-	}
-
-	var executionCmd string
+// buildExecutionCmd returns the shell command that compiles (if needed) and
+// runs the submitted code. Shared by the create-per-run path and the warm
+// pool exec path so both behave identically.
+func (s *DockerSandbox) buildExecutionCmd(spec LanguageSpec) string {
 	if spec.CompileCommand != "" {
-		executionCmd = spec.CompileCommand + " && " + spec.RunCommand
-	} else {
-		executionCmd = spec.RunCommand
+		return spec.CompileCommand + " && " + spec.RunCommand
 	}
+	return spec.RunCommand
+}
 
-	containerConfig := &container.Config{
-		Image:        spec.Image,
-		Cmd:          []string{"sh", "-c", executionCmd},
-		OpenStdin:    true,
-		StdinOnce:    true,
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		WorkingDir:   "/app",
-	}
-
+// buildHostConfig assembles the hardened HostConfig applied to every sandbox
+// container. It is shared verbatim by the create-per-run path and the warm
+// pool so pooled containers keep ALL hardening (no network, cap-drop ALL,
+// no-new-privileges, memory/CPU/pids limits, optional readonly rootfs+tmpfs).
+func (s *DockerSandbox) buildHostConfig(spec LanguageSpec) *container.HostConfig {
 	memoryLimit, err := units.RAMInBytes(s.cfg.DockerMemoryLimit)
 	if err != nil || memoryLimit <= 0 {
 		memoryLimit = 128 * 1024 * 1024
@@ -230,9 +252,39 @@ func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.Execu
 		hostConfig.Runtime = s.cfg.DockerRuntime
 	}
 
+	return hostConfig
+}
+
+func (s *DockerSandbox) Run(ctx context.Context, job *models.Job) (*models.ExecutionResult, error) {
+	spec, exists := s.languages[job.Language]
+	if !exists {
+		return nil, errors.New("unsupported language: " + job.Language)
+	}
+
 	if err := s.ensureImage(ctx, job.Language, spec.Image); err != nil {
 		return nil, err
 	}
+
+	executionCmd := s.buildExecutionCmd(spec)
+
+	// OPT-IN warm pool path (WARM_POOL_ENABLED). Default is nil -> unchanged
+	// create-per-run path below.
+	if s.pool != nil {
+		return s.runPooled(ctx, job, spec, executionCmd)
+	}
+
+	containerConfig := &container.Config{
+		Image:        spec.Image,
+		Cmd:          []string{"sh", "-c", executionCmd},
+		OpenStdin:    true,
+		StdinOnce:    true,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		WorkingDir:   "/app",
+	}
+
+	hostConfig := s.buildHostConfig(spec)
 
 	resp, err := s.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 	if err != nil {
