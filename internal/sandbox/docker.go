@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +41,9 @@ type DockerSandbox struct {
 	cli       *client.Client
 	cfg       *config.Config
 	languages LanguageConfig
+
+	verifiedMu sync.Mutex
+	verified   map[string]struct{}
 }
 
 func LoadLanguageConfig(configPath string) (LanguageConfig, error) {
@@ -66,7 +70,21 @@ func NewDockerSandbox(cfg *config.Config, langs LanguageConfig) (*DockerSandbox,
 		cli:       cli,
 		cfg:       cfg,
 		languages: langs,
+		verified:  make(map[string]struct{}),
 	}, nil
+}
+
+func (s *DockerSandbox) isVerified(imageName string) bool {
+	s.verifiedMu.Lock()
+	defer s.verifiedMu.Unlock()
+	_, ok := s.verified[imageName]
+	return ok
+}
+
+func (s *DockerSandbox) markVerified(imageName string) {
+	s.verifiedMu.Lock()
+	defer s.verifiedMu.Unlock()
+	s.verified[imageName] = struct{}{}
 }
 
 func (s *DockerSandbox) PrePullImages(ctx context.Context, languages []string) error {
@@ -87,6 +105,7 @@ func (s *DockerSandbox) PrePullImages(ctx context.Context, languages []string) e
 		}
 		_, _ = io.Copy(io.Discard, reader)
 		reader.Close()
+		s.markVerified(spec.Image)
 	}
 	if len(pullErrors) > 0 {
 		return errors.New("failed to pull images: " + strings.Join(pullErrors, "; "))
@@ -364,8 +383,13 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
 func (s *DockerSandbox) ensureImage(ctx context.Context, language string, imageName string) error {
+	if s.isVerified(imageName) {
+		return nil
+	}
+
 	_, _, err := s.cli.ImageInspectWithRaw(ctx, imageName)
 	if err == nil {
+		s.markVerified(imageName)
 		return nil
 	}
 
@@ -376,8 +400,11 @@ func (s *DockerSandbox) ensureImage(ctx context.Context, language string, imageN
 	}
 	defer reader.Close()
 
-	_, copyErr := io.Copy(io.Discard, reader)
-	return copyErr
+	if _, copyErr := io.Copy(io.Discard, reader); copyErr != nil {
+		return copyErr
+	}
+	s.markVerified(imageName)
+	return nil
 }
 
 func (s *DockerSandbox) runHealthCheck(ctx context.Context, language string, spec LanguageSpec) error {
