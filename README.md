@@ -2,7 +2,7 @@
 
 A self-hostable service that runs untrusted source code inside disposable Docker containers and returns the program's output. Clients submit a code snippet (or a set of files) plus optional stdin over HTTP; the API enqueues the job, a pool of workers executes it in an isolated, resource-capped, network-less container, and the result is streamed back to the client over Server-Sent Events. It is built around a Redis-backed job queue so the HTTP API and the executors can be scaled and run as separate processes.
 
-See [DESIGN.md](DESIGN.md) for the architecture, sandbox isolation model, and threat model.
+See [DESIGN.md](DESIGN.md) for the architecture, sandbox isolation model, and threat model. For throughput/latency load testing, see [bench/README.md](bench/README.md).
 
 ## Features
 
