@@ -70,6 +70,7 @@ func main() {
 	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM)
 
 	var workerPool *worker.WorkerPool
+	var dockerSandbox *sandbox.DockerSandbox
 
 	if mode == "worker" || mode == "both" {
 		var activeSandbox sandbox.Sandbox
@@ -84,24 +85,35 @@ func main() {
 			}
 			activeSandbox = nativeSandbox
 		default:
-			dockerSandbox, err := sandbox.NewDockerSandbox(cfg, langConfig)
+			ds, err := sandbox.NewDockerSandbox(cfg, langConfig)
 			if err != nil {
 				slog.Error("Docker client initialization failure", "error", err)
 				os.Exit(1)
 			}
+			dockerSandbox = ds
+
+			hotLanguages := languagesList
+			if len(cfg.PrePullLanguages) > 0 {
+				hotLanguages = cfg.PrePullLanguages
+			}
 
 			if cfg.PrePullImages {
-				prePullLanguages := languagesList
-				if len(cfg.PrePullLanguages) > 0 {
-					prePullLanguages = cfg.PrePullLanguages
-				}
 				go func() {
 					pullCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 					defer cancel()
-					_ = dockerSandbox.PrePullImages(pullCtx, prePullLanguages)
+					_ = dockerSandbox.PrePullImages(pullCtx, hotLanguages)
+					// Warm pool is a no-op unless WARM_POOL_ENABLED; pre-fill
+					// after images are present so warm containers can start.
+					dockerSandbox.WarmUp(context.Background(), hotLanguages)
+				}()
+			} else if cfg.WarmPoolEnabled {
+				go func() {
+					warmCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					dockerSandbox.WarmUp(warmCtx, hotLanguages)
 				}()
 			}
-			activeSandbox = dockerSandbox
+			activeSandbox = ds
 		}
 
 		workerPool = worker.NewWorkerPool(redisClient, activeSandbox, pgDB, cfg.MaxWorkers)
@@ -178,6 +190,10 @@ func main() {
 		if err := workerPool.Stop(ctx); err != nil {
 			slog.Error("Worker pool forced shutdown", "error", err)
 		}
+	}
+
+	if dockerSandbox != nil {
+		dockerSandbox.Close()
 	}
 
 	slog.Info("System shutdown completed successfully.")
