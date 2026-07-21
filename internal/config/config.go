@@ -33,6 +33,8 @@ type Config struct {
 	DockerRuntime        string
 	DatabaseURL          string
 	SandboxBackend       string
+	WarmPoolEnabled      bool
+	WarmPoolSize         int
 }
 
 func Load() (*Config, error) {
@@ -82,6 +84,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid MAX_OUTPUT_BYTES: %w", err)
 	}
 
+	warmPoolSize, err := getEnvInt("WARM_POOL_SIZE", 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WARM_POOL_SIZE: %w", err)
+	}
+
 	cfg := &Config{
 		Port:               port,
 		MaxWorkers:         maxWorkers,
@@ -107,6 +114,8 @@ func Load() (*Config, error) {
 		DockerRuntime:        getEnv("DOCKER_RUNTIME", ""),
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
 		SandboxBackend:       getEnv("SANDBOX_BACKEND", "docker"),
+		WarmPoolEnabled:      getEnvBool("WARM_POOL_ENABLED", false),
+		WarmPoolSize:         warmPoolSize,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -143,6 +152,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DockerReadonlyRootfs && c.DockerTmpfsSizeMB <= 0 {
 		return errors.New("DOCKER_TMPFS_SIZE_MB must be greater than 0 when DOCKER_READONLY_ROOTFS is enabled")
+	}
+	if c.WarmPoolSize < 0 {
+		return errors.New("WARM_POOL_SIZE cannot be negative")
+	}
+	if c.WarmPoolEnabled && c.WarmPoolSize <= 0 {
+		return errors.New("WARM_POOL_SIZE must be greater than 0 when WARM_POOL_ENABLED is set")
 	}
 	return nil
 }
