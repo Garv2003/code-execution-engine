@@ -18,6 +18,7 @@ Smallest correct change; don't add abstractions, config, or error handling for c
 ## Git
 Verify repo root with `git rev-parse --show-toplevel` before git commands. Before finishing: `git status`, `git diff`, relevant tests.
 Never add Claude/Anthropic attribution (`Co-Authored-By: Claude`, `Generated with Claude Code`) to commits or PRs.
+Commit author email is handled by `~/.gitconfig`'s `includeIf` for `~/Desktop/side-projects/` (personal email) — never hardcode or override `user.email`, and never use the work address here.
 
 ## Saving tokens (the user is on a tight usage limit)
 
